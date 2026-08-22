@@ -1,12 +1,13 @@
-"""Superliga Radar
+import os
 
-Python entry point for the project.
-"""
+import streamlit as st
 
+st.set_page_config(page_title="Superliga Radar", layout="centered")
+st.title("Superliga Radar")
+st.write("動作確認用の最小アプリです。")
 
-def main() -> None:
-    print("superliga-radar is ready.")
-
-
-if __name__ == "__main__":
-    main()
+token = os.getenv("SPORTMONKS_TOKEN")
+if token:
+    st.success("Sportmonksトークンを読み込めました")
+else:
+    st.error("トークンが見つかりません。Secretsを確認してください")

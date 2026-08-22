@@ -1,1 +1,2 @@
-# Add Python packages here as the project grows.
+streamlit
+streamlit
