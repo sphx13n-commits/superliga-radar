@@ -1,5 +1,6 @@
 import os
 
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 
@@ -30,6 +31,16 @@ STATISTIC_NAMES = {
     216: "クリア",
     321: "空中戦勝利",
     322: "ドリブル成功",
+}
+RADAR_STATISTIC_IDS = {
+    52,
+    79,
+    194,
+    214,
+    215,
+    216,
+    321,
+    322,
 }
 
 
@@ -168,15 +179,72 @@ try:
             if detail.get("value") is not None
         ]
 
-        st.subheader(f"{selected_player_name}のスタッツ")
-        if statistic_details:
-            for detail in statistic_details:
-                type_id = detail.get("type_id")
-                if type_id in STATISTIC_NAMES:
-                    st.write(
-                        f"- {STATISTIC_NAMES[type_id]}: "
-                        f"{get_total_value(detail)}"
-                    )
+        radar_values = {}
+        for detail in statistic_details:
+            type_id = detail.get("type_id")
+            value = get_total_value(detail)
+            if (
+                type_id in RADAR_STATISTIC_IDS
+                and isinstance(value, (int, float))
+            ):
+                radar_values[STATISTIC_NAMES[type_id]] = value
+
+        st.subheader(f"{selected_player_name}のレーダーチャート")
+        if radar_values:
+            minutes = get_minutes(selected_player)
+            display_values = list(radar_values.values())
+            if minutes > 0:
+                display_values = [
+                    round(value * 90 / minutes, 2)
+                    for value in display_values
+                ]
+                scale_label = "per90"
+            else:
+                scale_label = "実数値（出場時間なし）"
+
+            labels = list(radar_values)
+            chart_labels = labels + [labels[0]]
+            chart_values = display_values + [display_values[0]]
+            figure = go.Figure(
+                go.Scatterpolar(
+                    r=chart_values,
+                    theta=chart_labels,
+                    fill="toself",
+                    fillcolor="rgba(15, 45, 85, 0.22)",
+                    line={"color": "#0f2d55", "width": 3},
+                    marker={"color": "#0f2d55", "size": 7},
+                )
+            )
+            figure.update_layout(
+                height=680,
+                margin={"l": 40, "r": 40, "t": 45, "b": 45},
+                paper_bgcolor="white",
+                plot_bgcolor="white",
+                font={"color": "#0f2d55", "size": 14},
+                showlegend=False,
+                title={"text": f"指標（{scale_label}）", "font": {"size": 18}},
+                polar={
+                    "bgcolor": "white",
+                    "radialaxis": {
+                        "visible": True,
+                        "gridcolor": "#d9e2ef",
+                        "linecolor": "#9fb2ca",
+                        "tickfont": {"color": "#48617e"},
+                    },
+                    "angularaxis": {
+                        "gridcolor": "#d9e2ef",
+                        "linecolor": "#9fb2ca",
+                        "tickfont": {"color": "#0f2d55", "size": 14},
+                    },
+                },
+            )
+            st.plotly_chart(
+                figure,
+                use_container_width=True,
+                config={"displayModeBar": False},
+            )
+            st.write(f"選手名: {selected_player_name}")
+            st.write(f"出場時間: {minutes}分")
         else:
             st.info("この選手のスタッツがありません")
     else:
