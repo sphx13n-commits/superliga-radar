@@ -5,13 +5,70 @@ import requests
 import streamlit as st
 
 st.set_page_config(page_title="Superliga Radar", layout="centered")
-st.title("Superliga Radar")
-st.write("Superligaのチームと選手")
+
+_, language_column = st.columns([4, 1])
+with language_column:
+    language = st.selectbox(
+        "Language",
+        options=["日本語", "English"],
+        index=0,
+        label_visibility="collapsed",
+    )
+
+is_english = language == "English"
+TEXT = {
+    "title": "Superliga Radar",
+    "description": "Superliga teams and players"
+    if is_english
+    else "Superligaのチームと選手",
+    "token_missing": "Token not found"
+    if is_english
+    else "トークンが見つかりません",
+    "connected": "Connected to Sportmonks"
+    if is_english
+    else "Sportmonksに接続できました",
+    "season": "Current season" if is_english else "現在のシーズン",
+    "season_id": "Season ID" if is_english else "シーズンID",
+    "team_select": "Select a team" if is_english else "チームを選択してください",
+    "player_select": "Select a player"
+    if is_english
+    else "選手を選択してください",
+    "minute_filter": "Filter by playing time"
+    if is_english
+    else "出場時間で絞り込む",
+    "no_team": "No teams found for this season"
+    if is_english
+    else "このシーズンのチームが見つかりません",
+    "team_list": "Team players" if is_english else "の選手一覧",
+    "target_players": "Eligible players"
+    if is_english
+    else "対象選手",
+    "all_players": "all" if is_english else "全",
+    "player_chart": "Player radar chart"
+    if is_english
+    else "のレーダーチャート",
+    "stats": "Stats" if is_english else "指標",
+    "per90_note": "Values are stats per 90 minutes."
+    if is_english
+    else "数値は90分あたりのスタッツです",
+    "player_name": "Player" if is_english else "選手名",
+    "minutes": "Playing time" if is_english else "出場時間",
+    "download": "Download image" if is_english else "画像をダウンロード",
+    "no_players": "No player data found"
+    if is_english
+    else "選手データがありません",
+    "no_stats": "No stats available for this player"
+    if is_english
+    else "この選手のスタッツがありません",
+}
+
+st.title(TEXT["title"])
+st.write(TEXT["description"])
 
 token = os.getenv("SPORTMONKS_TOKEN")
 
 if not token:
-    st.error("トークンが見つかりません")
+    st.error(TEXT["token_missing"])
     st.stop()
 
 headers = {"Authorization": token}
@@ -31,6 +88,16 @@ STATISTIC_NAMES = {
     216: "クリア",
     321: "空中戦勝利",
     322: "ドリブル成功",
+}
+STATISTIC_NAMES_EN = {
+    52: "Goals",
+    79: "Assists",
+    194: "Shots",
+    214: "Tackles",
+    215: "Interceptions",
+    216: "Clearances",
+    321: "Aerials Won",
+    322: "Successful Dribbles",
 }
 RADAR_STATISTIC_IDS = {
     52,
@@ -97,17 +164,21 @@ try:
     teams_data = teams_res.json()
 
     if teams_res.status_code != 200:
-        st.error(f"チーム一覧の取得エラー: {teams_res.status_code}")
+        st.error(
+            f"Team list error: {teams_res.status_code}"
+            if is_english
+            else f"チーム一覧の取得エラー: {teams_res.status_code}"
+        )
         st.write(teams_data)
         st.stop()
 
-    st.success("Sportmonksに接続できました")
-    st.subheader(f"現在のシーズン: {season_name}")
-    st.caption(f"シーズンID: {season_id}")
+    st.success(TEXT["connected"])
+    st.subheader(f"{TEXT['season']}: {season_name}")
+    st.caption(f"{TEXT['season_id']}: {season_id}")
 
     teams = teams_data.get("data", [])
     if not teams:
-        st.info("このシーズンのチームが見つかりません")
+        st.info(TEXT["no_team"])
         st.stop()
 
     team_options = {
@@ -115,7 +186,10 @@ try:
         for team in teams
         if team.get("id")
     }
-    selected_team_name = st.selectbox("チームを選択してください", list(team_options))
+    selected_team_name = st.selectbox(
+        TEXT["team_select"],
+        list(team_options),
+    )
     selected_team_id = team_options[selected_team_name]
 
     # 選択したチームのシーズン別選手一覧とスタッツを取得
@@ -128,7 +202,11 @@ try:
     squad_data = squad_res.json()
 
     if squad_res.status_code != 200:
-        st.error(f"選手一覧の取得エラー: {squad_res.status_code}")
+        st.error(
+            f"Player list error: {squad_res.status_code}"
+            if is_english
+            else f"選手一覧の取得エラー: {squad_res.status_code}"
+        )
         st.write(squad_data)
         st.stop()
 
@@ -139,10 +217,13 @@ try:
     ]
 
     minute_filter = st.selectbox(
-        "出場時間で絞り込む",
+        TEXT["minute_filter"],
         options=[900, 600, 300, 0],
         format_func=lambda value: (
-            f"{value}分以上" if value else "指定なし"
+            f"{value}+ minutes" if is_english and value
+            else "Any playing time" if is_english
+            else f"{value}分以上" if value
+            else "指定なし"
         ),
     )
     players = [
@@ -151,8 +232,14 @@ try:
         if minute_filter == 0 or get_minutes(player) >= minute_filter
     ]
 
-    st.subheader(f"{selected_team_name}の選手一覧")
-    st.caption(f"対象選手: {len(players)}人 / 全{len(all_players)}人")
+    st.subheader(f"{selected_team_name}{TEXT['team_list']}")
+    if is_english:
+        st.caption(
+            f"{TEXT['target_players']}: {len(players)} / "
+            f"{TEXT['all_players']} {len(all_players)}"
+        )
+    else:
+        st.caption(f"対象選手: {len(players)}人 / 全{len(all_players)}人")
     if players:
         player_options = {
             player["name"]: player["id"]
@@ -160,7 +247,7 @@ try:
             if player.get("id")
         }
         selected_player_name = st.selectbox(
-            "選手を選択してください",
+            TEXT["player_select"],
             list(player_options),
         )
         selected_player = next(
@@ -180,6 +267,7 @@ try:
         ]
 
         radar_values = {}
+        radar_names = STATISTIC_NAMES_EN if is_english else STATISTIC_NAMES
         for detail in statistic_details:
             type_id = detail.get("type_id")
             value = get_total_value(detail)
@@ -187,9 +275,9 @@ try:
                 type_id in RADAR_STATISTIC_IDS
                 and isinstance(value, (int, float))
             ):
-                radar_values[STATISTIC_NAMES[type_id]] = value
+                radar_values[radar_names[type_id]] = value
 
-        st.subheader(f"{selected_player_name}のレーダーチャート")
+        st.subheader(f"{selected_player_name}{TEXT['player_chart']}")
         if radar_values:
             minutes = get_minutes(selected_player)
             display_values = list(radar_values.values())
@@ -200,7 +288,11 @@ try:
                 ]
                 scale_label = "per90"
             else:
-                scale_label = "実数値（出場時間なし）"
+                scale_label = (
+                    "Raw values (no playing time)"
+                    if is_english
+                    else "実数値（出場時間なし）"
+                )
 
             labels = list(radar_values)
             chart_labels = labels + [labels[0]]
@@ -222,7 +314,10 @@ try:
                 plot_bgcolor="white",
                 font={"color": "#0f2d55", "size": 14},
                 showlegend=False,
-                title={"text": f"指標（{scale_label}）", "font": {"size": 18}},
+                title={
+                    "text": f"{TEXT['stats']} ({scale_label})",
+                    "font": {"size": 18},
+                },
                 polar={
                     "bgcolor": "white",
                     "radialaxis": {
@@ -243,12 +338,37 @@ try:
                 use_container_width=True,
                 config={"displayModeBar": False},
             )
-            st.write(f"選手名: {selected_player_name}")
-            st.write(f"出場時間: {minutes}分")
+            st.caption(TEXT["per90_note"])
+            try:
+                png_data = figure.to_image(
+                    format="png",
+                    width=900,
+                    height=1100,
+                    scale=2,
+                )
+                st.download_button(
+                    label=TEXT["download"],
+                    data=png_data,
+                    file_name=f"{selected_player_name}_radar.png",
+                    mime="image/png",
+                )
+            except Exception as image_error:
+                st.warning(
+                    f"Image export error: {image_error}"
+                    if is_english
+                    else f"画像の生成エラー: {image_error}"
+                )
+            st.write(f"{TEXT['player_name']}: {selected_player_name}")
+            st.write(
+                f"{TEXT['minutes']}: "
+                f"{minutes}{' minutes' if is_english else '分'}"
+            )
         else:
-            st.info("この選手のスタッツがありません")
+            st.info(TEXT["no_stats"])
     else:
-        st.info("選手データがありません")
+        st.info(TEXT["no_players"])
 
 except Exception as e:
-    st.error(f"接続エラー: {e}")
+    st.error(
+        f"Connection error: {e}" if is_english else f"接続エラー: {e}"
+    )
