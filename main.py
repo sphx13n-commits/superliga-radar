@@ -18,6 +18,45 @@ params = {"api_token": token}
 base_url = "https://api.sportmonks.com/v3/football"
 season_id = 27897
 
+# Sportmonksの統計項目ID。APIから項目名が返らないため、対応できるものだけ日本語化する。
+STATISTIC_NAMES = {
+    52: "ゴール",
+    79: "アシスト",
+    88: "出場数",
+    119: "出場時間（分）",
+    194: "シュート",
+    214: "タックル",
+    215: "インターセプト",
+    216: "クリア",
+    321: "空中戦勝利",
+    322: "ドリブル成功",
+}
+
+
+def get_total_value(detail):
+    value = detail.get("value")
+    if isinstance(value, dict):
+        return value.get("total")
+    return value
+
+
+def get_season_statistics(player):
+    return [
+        statistic
+        for statistic in player.get("statistics", [])
+        if statistic.get("season_id") == season_id
+    ]
+
+
+def get_minutes(player):
+    for statistic in get_season_statistics(player):
+        for detail in statistic.get("details", []):
+            if detail.get("type_id") == 119:
+                value = get_total_value(detail)
+                return value if isinstance(value, (int, float)) else 0
+    return 0
+
+
 try:
     # リーグID 271（Superliga）のシーズン名を取得
     league_res = requests.get(
@@ -68,11 +107,11 @@ try:
     selected_team_name = st.selectbox("チームを選択してください", list(team_options))
     selected_team_id = team_options[selected_team_name]
 
-    # 選択したチームのシーズン別選手一覧を取得
+    # 選択したチームのシーズン別選手一覧とスタッツを取得
     squad_res = requests.get(
         f"{base_url}/squads/seasons/{season_id}/teams/{selected_team_id}",
         headers=headers,
-        params={**params, "include": "player"},
+        params={**params, "include": "player.statistics.details"},
         timeout=15,
     )
     squad_data = squad_res.json()
@@ -82,13 +121,27 @@ try:
         st.write(squad_data)
         st.stop()
 
-    players = [
+    all_players = [
         squad.get("player", {})
         for squad in squad_data.get("data", [])
         if squad.get("player", {}).get("name")
     ]
 
+    minute_filter = st.selectbox(
+        "出場時間で絞り込む",
+        options=[900, 600, 300, 0],
+        format_func=lambda value: (
+            f"{value}分以上" if value else "指定なし"
+        ),
+    )
+    players = [
+        player
+        for player in all_players
+        if minute_filter == 0 or get_minutes(player) >= minute_filter
+    ]
+
     st.subheader(f"{selected_team_name}の選手一覧")
+    st.caption(f"対象選手: {len(players)}人 / 全{len(all_players)}人")
     if players:
         player_options = {
             player["name"]: player["id"]
@@ -99,27 +152,14 @@ try:
             "選手を選択してください",
             list(player_options),
         )
-        selected_player_id = player_options[selected_player_name]
-
-        # 選択した選手の今シーズンのスタッツを取得
-        player_res = requests.get(
-            f"{base_url}/players/{selected_player_id}",
-            headers=headers,
-            params={**params, "include": "statistics.details"},
-            timeout=15,
+        selected_player = next(
+            player
+            for player in players
+            if player.get("id") == player_options[selected_player_name]
         )
-        player_data = player_res.json()
-
-        if player_res.status_code != 200:
-            st.error(f"スタッツの取得エラー: {player_res.status_code}")
-            st.write(player_data)
-            st.stop()
-
-        player_info = player_data.get("data", {})
         season_statistics = [
             statistic
-            for statistic in player_info.get("statistics", [])
-            if statistic.get("season_id") == season_id
+            for statistic in get_season_statistics(selected_player)
         ]
         statistic_details = [
             detail
@@ -130,19 +170,13 @@ try:
 
         st.subheader(f"{selected_player_name}のスタッツ")
         if statistic_details:
-            # APIで項目名が返らない場合はtype_idを項目名として表示
-            statistic_names = {
-                52: "ゴール",
-                88: "出場数",
-                119: "出場時間（分）",
-            }
             for detail in statistic_details:
                 type_id = detail.get("type_id")
-                name = statistic_names.get(type_id, f"統計項目（type_id: {type_id}）")
-                value = detail.get("value")
-                if isinstance(value, dict) and "total" in value:
-                    value = value["total"]
-                st.write(f"- {name}: {value}")
+                if type_id in STATISTIC_NAMES:
+                    st.write(
+                        f"- {STATISTIC_NAMES[type_id]}: "
+                        f"{get_total_value(detail)}"
+                    )
         else:
             st.info("この選手のスタッツがありません")
     else:
