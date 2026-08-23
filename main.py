@@ -8,10 +8,8 @@ import streamlit as st
 
 st.set_page_config(page_title="Superliga Radar", layout="centered")
 
-# ===== 色 =====
 NAVY = "#0B1F3A"
-NAVY_MID = "#16325C"
-NAVY_SOFT = "rgba(11, 31, 58, 0.38)"
+NAVY_SOFT = "rgba(11, 31, 58, 0.36)"
 GRID = "#B8C7D9"
 AXIS = "#6B82A0"
 BG = "#EEF2F7"
@@ -36,7 +34,6 @@ TEXT = {
     "token_missing": "Token not found" if is_english else "トークンが見つかりません",
     "connected": "Connected to Sportmonks" if is_english else "Sportmonksに接続できました",
     "season": "Season" if is_english else "シーズン",
-    "season_id": "Season ID" if is_english else "シーズンID",
     "season_select": "Select a season" if is_english else "シーズンを選択",
     "team_select": "Select a team" if is_english else "チームを選択",
     "player_select": "Select a player" if is_english else "選手を選択",
@@ -45,24 +42,24 @@ TEXT = {
     "team_list": " squad" if is_english else "の選手一覧",
     "target_players": "Shown" if is_english else "対象選手",
     "all_players": "total" if is_english else "全",
-    "per90_note": "Values are per 90 minutes. Missing stats = 0."
+    "per90_note": "Numbers on the chart are per 90 minutes (not percentiles)."
     if is_english
-    else "数値は90分あたり。データなしは0表示。",
+    else "チャート上の数字は「90分あたりの回数」です（パーセンタイルではありません）。",
     "download": "Download PNG" if is_english else "画像をダウンロード",
     "no_players": "No players found" if is_english else "選手データがありません",
     "no_stats": "No stats available" if is_english else "この選手のスタッツがありません",
-    "compared": "Compared to Superliga players (raw per90)"
+    "scale_explain": "Scale: actions per 90 minutes"
     if is_english
-    else "Superliga選手の per90 比較（絶対値）",
+    else "スケール：90分あたりの動作回数",
 }
 
-# 余白を全体的に詰める
 st.markdown(
     """
     <style>
-      .block-container { padding-top: 1rem; padding-bottom: 1.5rem; }
-      div[data-testid="stVerticalBlock"] > div { gap: 0.4rem; }
-      .stPlotlyChart { margin-top: -0.6rem; }
+      .block-container { padding-top: 0.8rem; padding-bottom: 1.2rem; }
+      div[data-testid="stVerticalBlock"] > div { gap: 0.25rem !important; }
+      .stPlotlyChart { margin-top: -1.1rem !important; margin-bottom: -0.4rem !important; }
+      [data-testid="stCaption"] { margin-top: 0.2rem !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -70,9 +67,9 @@ st.markdown(
 
 st.markdown(
     f"""
-    <div style="background:{NAVY};padding:16px 16px 12px;border-radius:12px;margin-bottom:12px;">
-      <div style="color:white;font-size:26px;font-weight:750;letter-spacing:0.3px;">Superliga Radar</div>
-      <div style="color:#C9D4E3;font-size:12px;margin-top:3px;">{TEXT["description"]}</div>
+    <div style="background:{NAVY};padding:14px 16px 11px;border-radius:12px;margin-bottom:10px;">
+      <div style="color:white;font-size:24px;font-weight:750;">Superliga Radar</div>
+      <div style="color:#C9D4E3;font-size:12px;margin-top:2px;">{TEXT["description"]}</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -194,7 +191,7 @@ try:
         st.stop()
 
     st.success(TEXT["connected"])
-    st.caption(f"{TEXT['season']}: {season_name}  /  ID: {season_id}")
+    st.caption(f"{TEXT['season']}: {season_name}")
 
     teams = teams_data.get("data", [])
     if not teams:
@@ -284,29 +281,29 @@ try:
         display_values = list(raw_values)
         scale_label = "raw"
 
-    # ===== 選手カード（レポート風・密） =====
+    # 選手カード
     st.markdown(
         f"""
         <div style="
-            background: linear-gradient(180deg, {WHITE} 0%, {BG} 100%);
-            border: 1px solid {CARD_BORDER};
-            border-left: 5px solid {NAVY};
-            border-radius: 10px;
-            padding: 12px 14px 10px;
-            margin: 4px 0 2px;
+            background:{WHITE};
+            border:1px solid {CARD_BORDER};
+            border-left:5px solid {NAVY};
+            border-radius:10px;
+            padding:10px 12px 8px;
+            margin:2px 0 0;
         ">
-          <div style="font-size:24px;font-weight:800;color:{NAVY};line-height:1.15;">
+          <div style="font-size:22px;font-weight:800;color:{NAVY};line-height:1.2;">
             {selected_player_name}
           </div>
-          <div style="margin-top:6px;font-size:13px;color:{AXIS};font-weight:600;">
+          <div style="margin-top:4px;font-size:13px;color:{AXIS};font-weight:600;">
             {selected_team_name}
             <span style="margin:0 6px;color:#B0BEC8;">|</span>
             {minutes}{" min" if is_english else "分"}
             <span style="margin:0 6px;color:#B0BEC8;">|</span>
             {scale_label}
           </div>
-          <div style="margin-top:4px;font-size:11px;color:#8A9BB0;">
-            {TEXT["compared"]}
+          <div style="margin-top:3px;font-size:11px;color:#8A9BB0;">
+            {TEXT["scale_explain"]}
           </div>
         </div>
         """,
@@ -320,11 +317,7 @@ try:
         chart_values = display_values + [display_values[0]]
         radial_max = max(max(display_values) * 1.15, 1.0)
 
-        # 値ラベル（レポート感）
-        value_text = [f"{v}" for v in display_values]
-
-        fig = go.Figure()
-        fig.add_trace(
+        fig = go.Figure(
             go.Scatterpolar(
                 r=chart_values,
                 theta=chart_labels,
@@ -333,30 +326,17 @@ try:
                 line={"color": NAVY, "width": 3.5},
                 marker={
                     "color": WHITE,
-                    "size": 10,
+                    "size": 9,
                     "line": {"color": NAVY, "width": 2.5},
                 },
                 mode="lines+markers",
-                hovertemplate="%{theta}: %{r}<extra></extra>",
-                name="",
-            )
-        )
-        # 各軸の数値を小さく表示
-        fig.add_trace(
-            go.Scatterpolar(
-                r=[v * 1.02 for v in display_values],
-                theta=labels,
-                mode="text",
-                text=value_text,
-                textfont={"size": 11, "color": NAVY, "family": "Arial"},
-                hoverinfo="skip",
-                showlegend=False,
+                hovertemplate="%{theta}: %{r} /90min<extra></extra>",
             )
         )
 
         fig.update_layout(
-            height=620,
-            margin={"l": 48, "r": 48, "t": 8, "b": 72},
+            height=560,
+            margin={"l": 40, "r": 40, "t": 4, "b": 58},
             paper_bgcolor=WHITE,
             plot_bgcolor=WHITE,
             font={"color": NAVY, "size": 12, "family": "Arial, sans-serif"},
@@ -368,8 +348,8 @@ try:
                     "yref": "paper",
                     "x": 0.99,
                     "y": 0.0,
-                    "sizex": 0.10,
-                    "sizey": 0.10,
+                    "sizex": 0.09,
+                    "sizey": 0.09,
                     "xanchor": "right",
                     "yanchor": "bottom",
                     "sizing": "contain",
@@ -381,12 +361,12 @@ try:
                     "text": "@Dalaprospect",
                     "xref": "paper",
                     "yref": "paper",
-                    "x": 0.86,
-                    "y": 0.035,
+                    "x": 0.87,
+                    "y": 0.03,
                     "xanchor": "right",
                     "yanchor": "middle",
                     "showarrow": False,
-                    "font": {"color": NAVY, "size": 14},
+                    "font": {"color": NAVY, "size": 13},
                 }
             ],
             polar={
@@ -398,12 +378,11 @@ try:
                     "linecolor": AXIS,
                     "tickfont": {"color": AXIS, "size": 10},
                     "showline": True,
-                    "layer": "below traces",
                 },
                 "angularaxis": {
                     "gridcolor": GRID,
                     "linecolor": AXIS,
-                    "tickfont": {"color": NAVY, "size": 12, "family": "Arial"},
+                    "tickfont": {"color": NAVY, "size": 12},
                     "rotation": 90,
                     "direction": "clockwise",
                 },
@@ -417,8 +396,14 @@ try:
         )
         st.caption(TEXT["per90_note"])
 
+        # 数値一覧（意味が分かる表）
+        cols = st.columns(4)
+        for i, (lab, val) in enumerate(zip(labels, display_values)):
+            with cols[i % 4]:
+                st.metric(lab, val)
+
         try:
-            png_data = fig.to_image(format="png", width=900, height=1100, scale=2)
+            png_data = fig.to_image(format="png", width=900, height=1000, scale=2)
             st.download_button(
                 label=TEXT["download"],
                 data=png_data,
