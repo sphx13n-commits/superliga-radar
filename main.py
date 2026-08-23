@@ -1,4 +1,4 @@
-import base64
+ import base64
 import json
 import os
 import time
@@ -66,34 +66,35 @@ def fmt_num(x, kind="raw"):
     return s if s else "0"
 
 
+# ラベルは見切れ防止のため短め
 POSITION_METRICS = {
     "GK": [
         {"key": "saves_p90", "label": "Saves/90", "tid": 57, "kind": "per90"},
-        {"key": "saves_box_p90", "label": "Saves Box/90", "tid": 104, "kind": "per90"},
+        {"key": "saves_box_p90", "label": "SavesBox/90", "tid": 104, "kind": "per90"},
         {"key": "conceded_p90", "label": "Conc./90", "tid": 88, "kind": "lower_better_per90"},
         {"key": "pass_acc", "label": "Pass Acc %", "kind": "ratio", "num": 116, "den": 80},
-        {"key": "acc_pass_p90", "label": "Acc Pass/90", "tid": 116, "kind": "per90"},
-        {"key": "long_p90", "label": "Long Balls/90", "tid": 122, "kind": "per90"},
+        {"key": "acc_pass_p90", "label": "AccPass/90", "tid": 116, "kind": "per90"},
+        {"key": "long_p90", "label": "Long/90", "tid": 122, "kind": "per90"},
         {"key": "recovery_p90", "label": "Recovery/90", "tid": 27271, "kind": "per90"},
     ],
     "DEF": [
         {"key": "tackles_p90", "label": "Tackles/90", "tid": 78, "kind": "per90"},
-        {"key": "int_p90", "label": "Intercepts/90", "tid": 100, "kind": "per90"},
-        {"key": "clear_p90", "label": "Clearances/90", "tid": 101, "kind": "per90"},
+        {"key": "int_p90", "label": "Int/90", "tid": 100, "kind": "per90"},
+        {"key": "clear_p90", "label": "Clear/90", "tid": 101, "kind": "per90"},
         {"key": "aerial_p90", "label": "Aerials/90", "tid": 107, "kind": "per90"},
         {"key": "pass_acc", "label": "Pass Acc %", "kind": "ratio", "num": 116, "den": 80},
-        {"key": "acc_pass_p90", "label": "Acc Pass/90", "tid": 116, "kind": "per90"},
+        {"key": "acc_pass_p90", "label": "AccPass/90", "tid": 116, "kind": "per90"},
         {"key": "recovery_p90", "label": "Recovery/90", "tid": 27271, "kind": "per90"},
         {"key": "fouls_p90", "label": "Fouls/90", "tid": 56, "kind": "lower_better_per90"},
     ],
     "MID": [
         {"key": "passes_p90", "label": "Passes/90", "tid": 80, "kind": "per90"},
         {"key": "pass_acc", "label": "Pass Acc %", "kind": "ratio", "num": 116, "den": 80},
-        {"key": "key_p90", "label": "Key Pass/90", "tid": 117, "kind": "per90"},
+        {"key": "key_p90", "label": "KeyPass/90", "tid": 117, "kind": "per90"},
         {"key": "assists_p90", "label": "Assists/90", "tid": 79, "kind": "per90"},
         {"key": "tackles_p90", "label": "Tackles/90", "tid": 78, "kind": "per90"},
-        {"key": "int_p90", "label": "Intercepts/90", "tid": 100, "kind": "per90"},
-        {"key": "succ_drib_p90", "label": "Succ Drib/90", "tid": 109, "kind": "per90"},
+        {"key": "int_p90", "label": "Int/90", "tid": 100, "kind": "per90"},
+        {"key": "succ_drib_p90", "label": "S.Drib/90", "tid": 109, "kind": "per90"},
         {"key": "recovery_p90", "label": "Recovery/90", "tid": 27271, "kind": "per90"},
     ],
     "FWD": [
@@ -101,9 +102,9 @@ POSITION_METRICS = {
         {"key": "assists_p90", "label": "Assists/90", "tid": 79, "kind": "per90"},
         {"key": "shots_p90", "label": "Shots/90", "tid": 42, "kind": "per90"},
         {"key": "sot_p90", "label": "SOT/90", "tid": 86, "kind": "per90"},
-        {"key": "key_p90", "label": "Key Pass/90", "tid": 117, "kind": "per90"},
-        {"key": "drib_att_p90", "label": "Drib Att/90", "tid": 108, "kind": "per90"},
-        {"key": "succ_drib_p90", "label": "Succ Drib/90", "tid": 109, "kind": "per90"},
+        {"key": "key_p90", "label": "KeyPass/90", "tid": 117, "kind": "per90"},
+        {"key": "drib_att_p90", "label": "DribAtt/90", "tid": 108, "kind": "per90"},
+        {"key": "succ_drib_p90", "label": "S.Drib/90", "tid": 109, "kind": "per90"},
         {"key": "aerial_p90", "label": "Aerials/90", "tid": 107, "kind": "per90"},
     ],
 }
@@ -293,11 +294,6 @@ def format_updated_at(iso_str):
 
 
 def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
-    """
-    - 上部タイトルの行間を広げて被り防止
-    - チャート領域を大きく確保（画像は縦長）
-    - 注釈は英語固定（Kaleidoの日本語文字化け回避）
-    """
     r_poly = values + [values[0]]
     theta = labels + [labels[0]]
     colors_closed = marker_colors + [marker_colors[0]]
@@ -412,15 +408,16 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
 
     fig.update_layout(
         height=1500,
-        width=1000,
-        margin={"l": 64, "r": 64, "t": 160, "b": 170},
+        width=1100,
+        margin={"l": 90, "r": 90, "t": 160, "b": 170},
         paper_bgcolor=WHITE,
         plot_bgcolor=WHITE,
         showlegend=False,
         images=images,
         annotations=annotations,
         polar={
-            "domain": {"x": [0.04, 0.96], "y": [0.16, 0.82]},
+            # 左右にラベル用の余白を確保
+            "domain": {"x": [0.10, 0.90], "y": [0.16, 0.82]},
             "bgcolor": BG,
             "radialaxis": {
                 "visible": True,
@@ -435,7 +432,7 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
                 "linecolor": AXIS,
                 "tickfont": {
                     "color": NAVY,
-                    "size": 24,
+                    "size": 20,
                     "family": "Arial Black, Arial, sans-serif",
                 },
                 "rotation": 90,
@@ -908,7 +905,8 @@ else:
     if not all_players:
         st.warning(T["no_players"])
     else:
-        all_players.sort(key=lambda g: (g["Team"], g["Player"]))
+        # 選手名アルファベット順
+        all_players.sort(key=lambda g: (g["Player"] or "").lower())
         labels = [
             f"{g['Player']} · {g['Team']} · {g['Pos']} · {g['Minutes']}′"
             for g in all_players
@@ -963,7 +961,6 @@ else:
             radar_values.append(pct if pct is not None else 0)
             marker_colors.append(band_color)
 
-        # PNG注釈は英語固定（Kaleidoの日本語文字化け回避）
         footnotes = [
             f"Axes = within-position percentiles (0–100) · Sample: {pos}, ≥{int(min_min)} min (n={n_pos})",
             "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30  |  Conceded/Fouls inverted",
@@ -983,7 +980,7 @@ else:
             footnotes,
         )
         try:
-            png = fig.to_image(format="png", width=1000, height=1500, scale=2)
+            png = fig.to_image(format="png", width=1100, height=1500, scale=2)
             st.image(png, use_container_width=True)
             st.caption(T["band_legend"])
             st.download_button(
