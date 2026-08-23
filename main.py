@@ -1,5 +1,6 @@
 import base64
 import os
+from datetime import date, datetime
 from pathlib import Path
 
 import plotly.graph_objects as go
@@ -99,6 +100,37 @@ STATISTIC_NAMES_EN = {
 }
 RADAR_ORDER = [52, 79, 194, 214, 215, 216, 321, 322]
 
+# Sportmonks position_id のざっくり対応
+POSITION_MAP = {
+    1: "GK",
+    2: "DEF",
+    3: "MID",
+    4: "FWD",
+    5: "DEF",
+    6: "MID",
+    7: "MID",
+    8: "FWD",
+    9: "FWD",
+    10: "MID",
+    11: "DEF",
+    12: "MID",
+    13: "GK",
+    14: "DEF",
+    15: "MID",
+    16: "FWD",
+    17: "DEF",
+    18: "MID",
+    19: "FWD",
+    20: "MID",
+    21: "DEF",
+    22: "MID",
+    23: "FWD",
+    24: "DEF",
+    25: "MID",
+    26: "FWD",
+    27: "GK",
+}
+
 
 def get_total_value(detail):
     value = detail.get("value")
@@ -118,6 +150,36 @@ def get_minutes(player):
                 value = get_total_value(detail)
                 return value if isinstance(value, (int, float)) else 0
     return 0
+
+
+def calc_age(date_of_birth):
+    if not date_of_birth:
+        return None
+    try:
+        born = datetime.strptime(str(date_of_birth)[:10], "%Y-%m-%d").date()
+        today = date.today()
+        return today.year - born.year - (
+            (today.month, today.day) < (born.month, born.day)
+        )
+    except Exception:
+        return None
+
+
+def get_position_label(player):
+    # よくあるフィールドを順に見る
+    for key in ("position_id", "position_id".upper()):
+        if player.get(key) in POSITION_MAP:
+            return POSITION_MAP[player.get(key)]
+    pos = player.get("position") or player.get("detailed_position") or {}
+    if isinstance(pos, dict):
+        name = pos.get("name") or pos.get("developer_name")
+        if name:
+            return str(name)
+        if pos.get("id") in POSITION_MAP:
+            return POSITION_MAP[pos.get("id")]
+    if player.get("position_id") in POSITION_MAP:
+        return POSITION_MAP[player.get("position_id")]
+    return "-"
 
 
 def get_logo_data_uri():
@@ -147,41 +209,46 @@ def build_radar_figure(labels, values, title_lines, radial_max):
         )
     )
 
-    annotations = [
-        {
-            "text": line,
-            "xref": "paper",
-            "yref": "paper",
-            "x": 0.02,
-            "y": 0.98 - i * 0.045,
-            "xanchor": "left",
-            "yanchor": "top",
-            "showarrow": False,
-            "font": {
-                "color": NAVY,
-                "size": 18 if i == 0 else 13,
-                "family": "Arial",
-            },
-        }
-        for i, line in enumerate(title_lines)
-    ]
+    # 上部を広く使って選手情報を大きく出す
+    annotations = []
+    y_pos = 0.995
+    sizes = [22, 14, 13]
+    for i, line in enumerate(title_lines):
+        annotations.append(
+            {
+                "text": line,
+                "xref": "paper",
+                "yref": "paper",
+                "x": 0.5,
+                "y": y_pos - i * 0.042,
+                "xanchor": "center",
+                "yanchor": "top",
+                "showarrow": False,
+                "font": {
+                    "color": NAVY,
+                    "size": sizes[i] if i < len(sizes) else 12,
+                    "family": "Arial",
+                },
+            }
+        )
     annotations.append(
         {
             "text": "@Dalaprospect",
             "xref": "paper",
             "yref": "paper",
             "x": 0.86,
-            "y": 0.03,
+            "y": 0.02,
             "xanchor": "right",
             "yanchor": "middle",
             "showarrow": False,
-            "font": {"color": NAVY, "size": 14, "family": "Arial"},
+            "font": {"color": NAVY, "size": 13, "family": "Arial"},
         }
     )
 
     fig.update_layout(
-        height=720,
-        margin={"l": 50, "r": 50, "t": 90, "b": 70},
+        height=780,
+        # 上部余白を確保して情報を載せる / レーダー自体は中央〜下
+        margin={"l": 40, "r": 40, "t": 120, "b": 60},
         paper_bgcolor=WHITE,
         plot_bgcolor=WHITE,
         font={"color": NAVY, "size": 13, "family": "Arial"},
@@ -193,8 +260,8 @@ def build_radar_figure(labels, values, title_lines, radial_max):
                 "yref": "paper",
                 "x": 0.99,
                 "y": 0.0,
-                "sizex": 0.10,
-                "sizey": 0.10,
+                "sizex": 0.09,
+                "sizey": 0.09,
                 "xanchor": "right",
                 "yanchor": "bottom",
                 "sizing": "contain",
@@ -203,6 +270,7 @@ def build_radar_figure(labels, values, title_lines, radial_max):
         ],
         annotations=annotations,
         polar={
+            "domain": {"x": [0.05, 0.95], "y": [0.0, 0.78]},
             "bgcolor": BG,
             "radialaxis": {
                 "visible": True,
@@ -292,10 +360,14 @@ try:
     selected_team_name = st.selectbox(TEXT["team_select"], sorted(team_options))
     selected_team_id = team_options[selected_team_name]
 
+    # 年齢・ポジション用に player の詳細も取る
     squad_res = requests.get(
         f"{base_url}/squads/seasons/{season_id}/teams/{selected_team_id}",
         headers=headers,
-        params={**params, "include": "player.statistics.details"},
+        params={
+            **params,
+            "include": "player.statistics.details;player.position;player.detailedPosition",
+        },
         timeout=30,
     )
     squad_data = squad_res.json()
@@ -361,6 +433,13 @@ try:
     raw_values = [raw_by_id.get(i, 0) for i in RADAR_ORDER]
 
     minutes = get_minutes(selected_player)
+    age = calc_age(
+        selected_player.get("date_of_birth")
+        or selected_player.get("dateOfBirth")
+        or selected_player.get("birthday")
+    )
+    position = get_position_label(selected_player)
+
     if minutes > 0:
         display_values = [round(v * 90 / minutes, 2) for v in raw_values]
         scale_label = "per90"
@@ -368,7 +447,10 @@ try:
         display_values = list(raw_values)
         scale_label = "raw"
 
-    # 選手カード
+    age_text = f"{age}" if age is not None else "-"
+    pos_text = position if position else "-"
+
+    # 画面上の選手カード
     st.markdown(
         f"""
         <div style="
@@ -385,9 +467,11 @@ try:
           <div style="margin-top:4px;font-size:13px;color:{AXIS};font-weight:600;">
             {selected_team_name}
             <span style="margin:0 6px;color:#B0BEC8;">|</span>
-            {minutes}{" min" if is_english else "分"}
+            {pos_text}
             <span style="margin:0 6px;color:#B0BEC8;">|</span>
-            {scale_label}
+            {age_text}{" yrs" if is_english else "歳"}
+            <span style="margin:0 6px;color:#B0BEC8;">|</span>
+            {minutes}{" min" if is_english else "分"}
           </div>
           <div style="margin-top:3px;font-size:11px;color:#8A9BB0;">
             {TEXT["scale_explain"]}
@@ -401,10 +485,11 @@ try:
         st.info(TEXT["no_stats"])
     else:
         radial_max = max(max(display_values) * 1.15, 1.0)
+        # 画像上部：名前を大きく、その下にクラブ・年齢・ポジション・分
         title_lines = [
             selected_player_name,
-            f"{selected_team_name}  |  {minutes} min  |  {scale_label}",
-            f"Superliga  {season_name}",
+            f"{selected_team_name}   |   {pos_text}   |   {age_text} yrs   |   {minutes} min",
+            f"Superliga {season_name}   ·   {scale_label}",
         ]
         fig_export = build_radar_figure(
             labels_en,
@@ -417,7 +502,7 @@ try:
             png_data = fig_export.to_image(
                 format="png",
                 width=900,
-                height=1100,
+                height=1120,
                 scale=2,
             )
             st.markdown(f"**{TEXT['save_hint']}**")
