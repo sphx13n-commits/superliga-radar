@@ -1,4 +1,6 @@
+import base64
 import os
+from pathlib import Path
 
 import plotly.graph_objects as go
 import requests
@@ -135,6 +137,13 @@ def get_minutes(player):
                 value = get_total_value(detail)
                 return value if isinstance(value, (int, float)) else 0
     return 0
+
+
+def get_logo_data_uri():
+    logo_path = Path(__file__).with_name("logo.png")
+    logo_bytes = logo_path.read_bytes()
+    encoded_logo = base64.b64encode(logo_bytes).decode("ascii")
+    return f"data:image/png;base64,{encoded_logo}"
 
 
 try:
@@ -348,11 +357,42 @@ try:
             )
             figure.update_layout(
                 height=680,
-                margin={"l": 40, "r": 40, "t": 45, "b": 45},
+                margin={"l": 40, "r": 40, "t": 45, "b": 105},
                 paper_bgcolor="white",
                 plot_bgcolor="white",
                 font={"color": "#0f2d55", "size": 14},
                 showlegend=False,
+                images=[
+                    {
+                        "source": get_logo_data_uri(),
+                        "xref": "paper",
+                        "yref": "paper",
+                        "x": 0.98,
+                        "y": 0.01,
+                        "sizex": 0.07,
+                        "sizey": 0.07,
+                        "xanchor": "right",
+                        "yanchor": "bottom",
+                        "sizing": "contain",
+                        "layer": "above",
+                    }
+                ],
+                annotations=[
+                    {
+                        "text": "@Dalaprospect",
+                        "xref": "paper",
+                        "yref": "paper",
+                        "x": 0.89,
+                        "y": 0.045,
+                        "xanchor": "right",
+                        "yanchor": "middle",
+                        "showarrow": False,
+                        "font": {
+                            "color": "#0f2d55",
+                            "size": 12,
+                        },
+                    }
+                ],
                 title={
                     "text": f"{TEXT['stats']} ({scale_label})",
                     "font": {"size": 18},
