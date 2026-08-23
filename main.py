@@ -577,3 +577,171 @@ try:
 
 except Exception as e:
     st.error(f"接続エラー: {e}" if not is_english else f"Connection error: {e}")
+# ============================================================
+# 一時デバッグ：Superliga 1試合の lineups.details 確認用
+# 確認後にこのブロック全体を削除してください
+# トークンは表示しません
+# ============================================================
+st.divider()
+st.subheader("Fixture type_id 確認（一時）")
+st.caption(
+    "終了済み Superliga 1試合だけを対象に、lineups.details の type_id / code / name / value を確認します。"
+)
+
+_debug_token = os.getenv("SPORTMONKS_TOKEN")
+if not _debug_token:
+    st.warning("SPORTMONKS_TOKEN が Secrets にありません。")
+else:
+    _debug_base = "https://api.sportmonks.com/v3/football"
+    _debug_headers = {"Authorization": _debug_token}
+    _debug_params = {"api_token": _debug_token}
+
+    # 確認したい type_id（照合用）
+    _TARGET_IDS = {
+        52, 42, 86, 80, 81, 82, 117, 78, 100, 101,
+        107, 108, 109, 56, 57, 118, 119,
+    }
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        use_auto = st.checkbox("日付範囲から1試合を自動取得", value=True)
+    with col_b:
+        manual_fixture_id = st.text_input(
+            "または fixture_id を直接入力",
+            value="",
+            placeholder="例: 12345678",
+        )
+
+    start_date = st.text_input("開始日 (YYYY-MM-DD)", value="2026-08-14")
+    end_date = st.text_input("終了日 (YYYY-MM-DD)", value="2026-08-15")
+
+    if st.button("1試合だけ確認する"):
+        try:
+            fixture_id = None
+            fixture_name = ""
+
+            # --- fixture_id の決定（1件だけ）---
+            if manual_fixture_id.strip().isdigit():
+                fixture_id = int(manual_fixture_id.strip())
+            elif use_auto:
+                between_url = (
+                    f"{_debug_base}/fixtures/between/{start_date}/{end_date}"
+                )
+                between_res = requests.get(
+                    between_url,
+                    headers=_debug_headers,
+                    params={
+                        **_debug_params,
+                        "filters": "fixtureLeagues:271",
+                    },
+                    timeout=30,
+                )
+                between_data = between_res.json()
+                if between_res.status_code != 200:
+                    st.error(f"fixtures/between エラー: {between_res.status_code}")
+                    st.write(between_data)
+                else:
+                    fixtures = between_data.get("data") or []
+                    if not fixtures:
+                        st.warning("指定日の Superliga 試合が見つかりません。日付を変えてください。")
+                    else:
+                        fx = fixtures[0]
+                        fixture_id = fx.get("id")
+                        # 名前が取れれば表示
+                        participants = fx.get("name") or fx.get("starting_at") or ""
+                        fixture_name = str(participants)
+
+            if fixture_id:
+                st.info(f"使用 fixture_id: {fixture_id}" + (f" / {fixture_name}" if fixture_name else ""))
+
+                fix_res = requests.get(
+                    f"{_debug_base}/fixtures/{fixture_id}",
+                    headers=_debug_headers,
+                    params={
+                        **_debug_params,
+                        "include": "lineups.details.type;participants",
+                    },
+                    timeout=30,
+                )
+                fix_data = fix_res.json()
+                if fix_res.status_code != 200:
+                    st.error(f"fixtures/{{id}} エラー: {fix_res.status_code}")
+                    st.write(fix_data)
+                else:
+                    data = fix_data.get("data") or {}
+                    lineups = data.get("lineups") or []
+
+                    st.write(f"lineups 人数: {len(lineups)}")
+
+                    rows = []
+                    seen_ids = set()
+                    for lu in lineups:
+                        player = lu.get("player") or {}
+                        player_name = (
+                            player.get("name")
+                            or lu.get("player_name")
+                            or f"player_id={lu.get('player_id')}"
+                        )
+                        details = lu.get("details") or []
+                        for d in details:
+                            tid = d.get("type_id")
+                            t = d.get("type") or {}
+                            val = d.get("value")
+                            if isinstance(val, dict):
+                                # total があればそれを優先
+                                display_val = val.get("total", val)
+                            else:
+                                display_val = val
+                            rows.append(
+                                {
+                                    "player": player_name,
+                                    "type_id": tid,
+                                    "code": t.get("code"),
+                                    "name": t.get("name"),
+                                    "developer_name": t.get("developer_name"),
+                                    "value": display_val,
+                                }
+                            )
+                            if tid is not None:
+                                seen_ids.add(tid)
+
+                    if not rows:
+                        st.warning(
+                            "lineups.details が空です。"
+                            "この試合・プランでは Player Fixture Statistics が無い可能性があります。"
+                        )
+                    else:
+                        st.success(f"details 行数: {len(rows)} / ユニーク type_id: {len(seen_ids)}")
+
+                        # 確認対象との照合
+                        present = sorted(_TARGET_IDS & seen_ids)
+                        missing = sorted(_TARGET_IDS - seen_ids)
+                        st.markdown("**確認対象のうち、レスポンスに存在した type_id**")
+                        st.write(present if present else "なし")
+                        st.markdown("**確認対象のうち、存在しなかった type_id**")
+                        st.write(missing if missing else "なし")
+
+                        st.markdown("**出現した全 type_id（重複なし）**")
+                        st.write(sorted(seen_ids))
+
+                        st.markdown("**詳細一覧（type_id / code / name / value）**")
+                        st.dataframe(rows, use_container_width=True, hide_index=True)
+
+                        # AGF っぽい名前があれば抜粋
+                        agf_rows = [
+                            r for r in rows
+                            if "agf" in str(r.get("player", "")).lower()
+                            or any(
+                                n in str(r.get("player", "")).lower()
+                                for n in ("kahl", "bech", "hansen", "mortensen", "links")
+                            )
+                        ]
+                        if agf_rows:
+                            st.markdown("**AGF関連っぽい選手の抜粋**")
+                            st.dataframe(agf_rows, use_container_width=True, hide_index=True)
+
+        except Exception as _debug_e:
+            st.error(f"デバッグ取得エラー: {_debug_e}")
+# ============================================================
+# 一時デバッグここまで
+# ============================================================
