@@ -45,7 +45,7 @@ TEXT = {
     "all_players": "total" if is_english else "全",
     "per90_note": "Values are per 90 minutes (not percentiles)."
     if is_english
-    else "数値は90分あたりの回数です（パーセンタイルではありません）。",
+    else "数値は90分あたり（パーセンタイルではありません）。",
     "save_hint": "Long-press the image to save it to Photos."
     if is_english
     else "下の画像を長押しすると、写真に保存できます。",
@@ -55,6 +55,9 @@ TEXT = {
     "scale_explain": "Scale: actions per 90 minutes"
     if is_english
     else "スケール：90分あたりの動作回数",
+    "all_stats": "All stats returned for this player (debug)"
+    if is_english
+    else "この選手で取得できた全指標（確認用）",
 }
 
 st.markdown(
@@ -88,16 +91,37 @@ base_url = "https://api.sportmonks.com/v3/football"
 default_season_id = 27897
 season_id = default_season_id
 
-STATISTIC_NAMES_EN = {
-    52: "Goals",
-    79: "Assists",
-    194: "Shots",
-    214: "Tackles",
-    215: "Intercepts",
-    216: "Clearances",
-    321: "Aerials",
-    322: "Dribbles",
+# 名前が分かるものだけ日本語/英語表示。未知のtype_idはそのまま出す
+KNOWN_NAMES = {
+    40: ("Captain", "キャプテン"),
+    41: ("Shots off target", "枠外シュート"),
+    42: ("Shots total", "シュート合計"),
+    51: ("Offsides", "オフサイド"),
+    52: ("Goals", "ゴール"),
+    56: ("Fouls", "ファウル"),
+    57: ("Saves", "セーブ"),
+    58: ("Shots blocked", "ブロック"),
+    64: ("Hit woodwork", "ポスト"),
+    78: ("Tackles", "タックル"),
+    79: ("Assists", "アシスト"),
+    80: ("Passes", "パス"),
+    81: ("Successful passes", "成功パス"),
+    82: ("Pass %", "パス成功率"),
+    88: ("Appearances", "出場数"),
+    117: ("Key passes", "キーパス"),
+    118: ("Rating", "レーティング"),
+    119: ("Minutes", "出場時間"),
+    194: ("Shots", "シュート"),
+    214: ("Tackles", "タックル"),
+    215: ("Intercepts", "インターセプト"),
+    216: ("Clearances", "クリア"),
+    321: ("Aerials won", "空中戦勝利"),
+    322: ("Dribbles success", "ドリブル成功"),
+    1584: ("Accurate pass %", "パス精度%"),
+    5304: ("xG", "xG"),
 }
+
+# 暫定レーダー（後で全指標確認後に組み直す）
 RADAR_ORDER = [52, 79, 194, 214, 215, 216, 321, 322]
 
 POSITION_MAP = {
@@ -111,7 +135,17 @@ POSITION_MAP = {
 def get_total_value(detail):
     value = detail.get("value")
     if isinstance(value, dict):
-        return value.get("total")
+        if "total" in value and value["total"] is not None:
+            return value["total"]
+        if "average" in value and value["average"] is not None:
+            return value["average"]
+        if "percentage" in value and value["percentage"] is not None:
+            return value["percentage"]
+        # dictの最初の数値
+        for v in value.values():
+            if isinstance(v, (int, float)):
+                return v
+        return None
     return value
 
 
@@ -148,10 +182,26 @@ def get_position_label(player):
     if isinstance(pos, dict):
         name = pos.get("name") or pos.get("developer_name")
         if name:
+            upper = str(name).upper()
+            if "GOAL" in upper or upper == "GK":
+                return "GK"
+            if "DEF" in upper or "BACK" in upper:
+                return "DEF"
+            if "MID" in upper:
+                return "MID"
+            if "ATT" in upper or "FWD" in upper or "FORW" in upper or "WING" in upper:
+                return "FWD"
             return str(name)
         if pos.get("id") in POSITION_MAP:
             return POSITION_MAP[pos.get("id")]
-    return "-"
+    return "MID"
+
+
+def known_name(type_id):
+    if type_id in KNOWN_NAMES:
+        en, ja = KNOWN_NAMES[type_id]
+        return en if is_english else ja
+    return f"type_id {type_id}"
 
 
 def get_logo_data_uri():
@@ -164,7 +214,6 @@ def get_logo_data_uri():
 def build_radar_figure(labels, values, title_lines, radial_max):
     chart_labels = labels + [labels[0]]
     chart_values = values + [values[0]]
-
     fig = go.Figure(
         go.Scatterpolar(
             r=chart_values,
@@ -180,7 +229,6 @@ def build_radar_figure(labels, values, title_lines, radial_max):
             mode="lines+markers",
         )
     )
-
     annotations = []
     sizes = [28, 16, 14]
     for i, line in enumerate(title_lines):
@@ -201,8 +249,6 @@ def build_radar_figure(labels, values, title_lines, radial_max):
                 },
             }
         )
-
-    # ロゴの直下にアカウント名（右下）
     annotations.append(
         {
             "text": "@Dalaprospect",
@@ -216,7 +262,6 @@ def build_radar_figure(labels, values, title_lines, radial_max):
             "font": {"color": NAVY, "size": 12, "family": "Arial"},
         }
     )
-
     fig.update_layout(
         height=820,
         margin={"l": 36, "r": 36, "t": 140, "b": 78},
@@ -390,17 +435,28 @@ try:
         d
         for s in get_season_statistics(selected_player)
         for d in s.get("details", [])
-        if d.get("value") is not None
     ]
+
+    # type_id -> value
+    all_stats_rows = []
     raw_by_id = {}
     for d in details:
         tid = d.get("type_id")
         val = get_total_value(d)
-        if tid in RADAR_ORDER and isinstance(val, (int, float)):
-            raw_by_id[tid] = val
+        if tid is None:
+            continue
+        raw_by_id[tid] = val
+        all_stats_rows.append(
+            {
+                "type_id": tid,
+                "name": known_name(tid),
+                "value": val,
+                "raw": d.get("value"),
+            }
+        )
 
-    labels_en = [STATISTIC_NAMES_EN[i] for i in RADAR_ORDER]
-    raw_values = [raw_by_id.get(i, 0) for i in RADAR_ORDER]
+    # type_id順で表示
+    all_stats_rows = sorted(all_stats_rows, key=lambda x: x["type_id"] or 0)
 
     minutes = get_minutes(selected_player)
     age = calc_age(
@@ -409,14 +465,6 @@ try:
         or selected_player.get("birthday")
     )
     position = get_position_label(selected_player)
-
-    if minutes > 0:
-        display_values = [round(v * 90 / minutes, 2) for v in raw_values]
-        scale_label = "per90"
-    else:
-        display_values = list(raw_values)
-        scale_label = "raw"
-
     age_text = f"{age}" if age is not None else "-"
     pos_text = position if position else "-"
 
@@ -442,13 +490,55 @@ try:
             <span style="margin:0 6px;color:#B0BEC8;">|</span>
             {minutes}{" min" if is_english else "分"}
           </div>
-          <div style="margin-top:3px;font-size:11px;color:#8A9BB0;">
-            {TEXT["scale_explain"]}
-          </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+    # ===== 全指標一覧（ここが今回の本命） =====
+    st.subheader(TEXT["all_stats"])
+    st.caption(
+        "ポジション別レーダー用に、使える type_id をここから選びます。"
+        if not is_english
+        else "Use these type_ids to design position-specific radars."
+    )
+    if all_stats_rows:
+        st.write(f"{'件数' if not is_english else 'Count'}: {len(all_stats_rows)}")
+        st.dataframe(
+            [
+                {
+                    "type_id": r["type_id"],
+                    "name": r["name"],
+                    "value": r["value"],
+                }
+                for r in all_stats_rows
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+        with st.expander("raw value (debug)" if is_english else "raw値（詳細）"):
+            st.json({str(r["type_id"]): r["raw"] for r in all_stats_rows})
+    else:
+        st.warning(
+            "この選手・シーズンでは statistics.details が空でした。"
+            if not is_english
+            else "No statistics.details for this player/season."
+        )
+
+    # 暫定レーダー（確認用）
+    labels = [known_name(i) if not is_english else KNOWN_NAMES.get(i, (f"id{i}",))[0] for i in RADAR_ORDER]
+    # English labels for export image (avoid JP font issues)
+    labels_en = [KNOWN_NAMES.get(i, (f"id{i}", f"id{i}"))[0] for i in RADAR_ORDER]
+    raw_values = [
+        raw_by_id[i] if isinstance(raw_by_id.get(i), (int, float)) else 0
+        for i in RADAR_ORDER
+    ]
+    if minutes > 0:
+        display_values = [round(v * 90 / minutes, 2) for v in raw_values]
+        scale_label = "per90"
+    else:
+        display_values = list(raw_values)
+        scale_label = "raw"
 
     if sum(display_values) == 0:
         st.info(TEXT["no_stats"])
@@ -465,13 +555,9 @@ try:
             title_lines=title_lines,
             radial_max=radial_max,
         )
-
         try:
             png_data = fig_export.to_image(
-                format="png",
-                width=900,
-                height=1180,
-                scale=2,
+                format="png", width=900, height=1180, scale=2
             )
             st.markdown(f"**{TEXT['save_hint']}**")
             st.image(png_data, use_container_width=True)
