@@ -29,6 +29,7 @@ TEXT = {
     else "Sportmonksに接続できました",
     "season": "Current season" if is_english else "現在のシーズン",
     "season_id": "Season ID" if is_english else "シーズンID",
+    "season_select": "Select a season" if is_english else "シーズンを選択してください",
     "team_select": "Select a team" if is_english else "チームを選択してください",
     "player_select": "Select a player"
     if is_english
@@ -74,7 +75,8 @@ if not token:
 headers = {"Authorization": token}
 params = {"api_token": token}
 base_url = "https://api.sportmonks.com/v3/football"
-season_id = 27897
+default_season_id = 27897
+season_id = default_season_id
 
 # Sportmonksの統計項目ID。APIから項目名が返らないため、対応できるものだけ日本語化する。
 STATISTIC_NAMES = {
@@ -136,11 +138,11 @@ def get_minutes(player):
 
 
 try:
-    # リーグID 271（Superliga）のシーズン名を取得
+    # リーグID 271（Superliga）のシーズン一覧と現在シーズンを取得
     league_res = requests.get(
         f"{base_url}/leagues/271",
         headers=headers,
-        params={**params, "include": "currentSeason"},
+        params={**params, "include": "currentSeason;seasons"},
         timeout=15,
     )
     league_data = league_res.json()
@@ -152,9 +154,46 @@ try:
 
     league = league_data.get("data", {})
     current_season = league.get("currentseason") or league.get("currentSeason") or {}
-    season_name = current_season.get("name") or f"シーズンID: {season_id}"
+    season_records = [
+        season
+        for season in league.get("seasons", [])
+        if season.get("id") and season.get("name")
+    ]
+    if not season_records and current_season.get("id"):
+        season_records = [current_season]
+    if not season_records:
+        st.error("No seasons found" if is_english else "シーズンが見つかりません")
+        st.stop()
 
-    # シーズン27897に所属するチーム一覧を取得
+    season_records.sort(
+        key=lambda season: (
+            season.get("id") == current_season.get("id"),
+            season.get("starting_at", ""),
+        ),
+        reverse=True,
+    )
+    season_options = {
+        season["name"]: season["id"]
+        for season in season_records
+    }
+    season_names = list(season_options)
+    default_season_name = next(
+        (
+            season["name"]
+            for season in season_records
+            if season["id"] == default_season_id
+        ),
+        current_season.get("name", season_names[0]),
+    )
+    selected_season_name = st.selectbox(
+        TEXT["season_select"],
+        season_names,
+        index=season_names.index(default_season_name),
+    )
+    season_id = season_options[selected_season_name]
+    season_name = selected_season_name
+
+    # 選択したシーズンに所属するチーム一覧を取得
     teams_res = requests.get(
         f"{base_url}/teams/seasons/{season_id}",
         headers=headers,
