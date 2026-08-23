@@ -5,6 +5,7 @@ import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
@@ -26,11 +27,10 @@ LEAGUE_ID = 271
 CACHE_ROOT = Path(__file__).with_name("cache") / "superliga"
 POSITION_MAP = {24: "GK", 25: "DEF", 26: "MID", 27: "FWD"}
 
-# Percentile bands
-BAND_ELITE = "#0B1F3A"      # 90-100
-BAND_STRONG = "#2F6FED"     # 70-89
-BAND_AVG = "#8FA3BF"        # 30-69
-BAND_BELOW = "#C5CEDA"      # 0-29
+BAND_ELITE = "#0B1F3A"
+BAND_STRONG = "#2F6FED"
+BAND_AVG = "#8FA3BF"
+BAND_BELOW = "#C5CEDA"
 
 
 def percentile_band(p):
@@ -43,6 +43,26 @@ def percentile_band(p):
     if p >= 30:
         return "Average", BAND_AVG
     return "Below", BAND_BELOW
+
+
+def fmt_num(x, kind="raw"):
+    """表用の数値整形。"""
+    if x is None:
+        return "—"
+    if isinstance(x, str):
+        return x
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return x
+    if kind == "pct":
+        return round(v, 1)
+    if kind == "per90":
+        return round(v, 2)
+    # raw
+    if abs(v - round(v)) < 1e-9:
+        return int(round(v))
+    return round(v, 1)
 
 
 POSITION_METRICS = {
@@ -272,34 +292,54 @@ def format_updated_at(iso_str):
 
 
 def build_radar_figure(labels, values, title_lines, marker_colors):
-    """values = percentiles 0-100; marker_colors aligned with values (no close point)."""
-    r = values + [values[0]]
+    """
+    頂点マーカー + その外側に大きめのPercentile数字。
+    軸レンジを 0–118 にして数字用の余白を確保。
+    """
+    r_poly = values + [values[0]]
     theta = labels + [labels[0]]
-    text_vals = [f"{int(round(v))}" if v is not None else "" for v in values]
-    text_vals_closed = text_vals + [text_vals[0]]
     colors_closed = marker_colors + [marker_colors[0]]
 
-    fig = go.Figure(
+    # 数字は頂点より外側（最大118）
+    r_text = [min(v + 14, 116) for v in values]
+    r_text_closed = r_text + [r_text[0]]
+    text_vals = [f"{int(round(v))}" for v in values]
+    text_closed = text_vals + [text_vals[0]]
+
+    fig = go.Figure()
+
+    # 塗りつぶし＋線＋マーカー
+    fig.add_trace(
         go.Scatterpolar(
-            r=r,
+            r=r_poly,
             theta=theta,
             fill="toself",
             fillcolor=NAVY_SOFT,
-            line={"color": NAVY, "width": 3.2},
+            line={"color": NAVY, "width": 3.4},
             marker={
                 "color": colors_closed,
-                "size": 14,
-                "line": {"color": WHITE, "width": 2},
+                "size": 16,
+                "line": {"color": WHITE, "width": 2.5},
             },
-            mode="lines+markers+text",
-            text=text_vals_closed,
-            textposition="top center",
-            textfont={"size": 13, "color": NAVY, "family": "Arial"},
+            mode="lines+markers",
             hovertemplate="%{theta}: %{r:.0f}<extra></extra>",
         )
     )
+
+    # 数字専用トレース（マーカーなし）
+    fig.add_trace(
+        go.Scatterpolar(
+            r=r_text_closed,
+            theta=theta,
+            mode="text",
+            text=text_closed,
+            textfont={"size": 18, "color": NAVY, "family": "Arial Black, Arial"},
+            hoverinfo="skip",
+        )
+    )
+
     annotations = []
-    sizes = [32, 17, 14]
+    sizes = [40, 20, 16]
     for i, line in enumerate(title_lines):
         annotations.append(
             {
@@ -307,13 +347,13 @@ def build_radar_figure(labels, values, title_lines, marker_colors):
                 "xref": "paper",
                 "yref": "paper",
                 "x": 0.5,
-                "y": 0.995 - i * 0.048,
+                "y": 0.995 - i * 0.052,
                 "xanchor": "center",
                 "yanchor": "top",
                 "showarrow": False,
                 "font": {
                     "color": NAVY,
-                    "size": sizes[i] if i < len(sizes) else 13,
+                    "size": sizes[i] if i < len(sizes) else 14,
                     "family": "Arial",
                 },
             }
@@ -324,11 +364,11 @@ def build_radar_figure(labels, values, title_lines, marker_colors):
             "xref": "paper",
             "yref": "paper",
             "x": 0.93,
-            "y": 0.01,
+            "y": 0.012,
             "xanchor": "center",
             "yanchor": "bottom",
             "showarrow": False,
-            "font": {"color": NAVY, "size": 13, "family": "Arial"},
+            "font": {"color": NAVY, "size": 14, "family": "Arial"},
         }
     )
     images = []
@@ -349,28 +389,30 @@ def build_radar_figure(labels, values, title_lines, marker_colors):
                 "layer": "above",
             }
         )
+
     fig.update_layout(
-        height=900,
-        margin={"l": 48, "r": 48, "t": 160, "b": 88},
+        height=960,
+        margin={"l": 52, "r": 52, "t": 175, "b": 92},
         paper_bgcolor=WHITE,
         plot_bgcolor=WHITE,
         showlegend=False,
         images=images,
         annotations=annotations,
         polar={
-            "domain": {"x": [0.02, 0.98], "y": [0.05, 0.70]},
+            "domain": {"x": [0.03, 0.97], "y": [0.04, 0.68]},
             "bgcolor": BG,
             "radialaxis": {
                 "visible": True,
-                "range": [0, 100],
+                "range": [0, 118],
+                "tickvals": [0, 20, 40, 60, 80, 100],
                 "gridcolor": GRID,
                 "linecolor": AXIS,
-                "tickfont": {"color": AXIS, "size": 12},
+                "tickfont": {"color": AXIS, "size": 13},
             },
             "angularaxis": {
                 "gridcolor": GRID,
                 "linecolor": AXIS,
-                "tickfont": {"color": NAVY, "size": 15},
+                "tickfont": {"color": NAVY, "size": 17},
                 "rotation": 90,
                 "direction": "clockwise",
             },
@@ -414,7 +456,6 @@ def style_percentile_col(val):
     except (TypeError, ValueError):
         return ""
     _, color = percentile_band(p)
-    # readable text on dark elite band
     text = "#FFFFFF" if p >= 90 else NAVY
     return f"background-color: {color}; color: {text}; font-weight: 600;"
 
@@ -745,7 +786,6 @@ def incremental_update(sid, season_meta_row, force_all=False):
     return aggs, status, errors
 
 
-# auto load
 if "fx_aggs" not in st.session_state or st.session_state.fx_aggs is None:
     aggs, meta = restore_aggs_from_file(season_id)
     if aggs is not None:
@@ -873,17 +913,17 @@ else:
                 raw_v = selected["raw"].get(m["tid"], 0)
             else:
                 raw_v = (
-                    f"{selected['raw'].get(m['num'], 0)} / "
-                    f"{selected['raw'].get(m['den'], 0)}"
+                    f"{fmt_num(selected['raw'].get(m['num'], 0))} / "
+                    f"{fmt_num(selected['raw'].get(m['den'], 0))}"
                 )
             pct = selected.get("pct", {}).get(m["key"])
             band_name, band_color = percentile_band(pct)
             check_rows.append(
                 {
                     "Metric": m["label"],
-                    "Raw": raw_v,
-                    "Per90 / %": selected["metrics"].get(m["key"]),
-                    "Percentile": pct,
+                    "Raw": fmt_num(raw_v, "raw") if not isinstance(raw_v, str) else raw_v,
+                    "Per90 / %": fmt_num(selected["metrics"].get(m["key"]), "per90"),
+                    "Percentile": fmt_num(pct, "pct"),
                     "Band": band_name,
                 }
             )
@@ -902,7 +942,7 @@ else:
             marker_colors,
         )
         try:
-            png = fig.to_image(format="png", width=900, height=1240, scale=2)
+            png = fig.to_image(format="png", width=960, height=1280, scale=2)
             st.image(png, use_container_width=True)
             st.caption(T["band_legend"])
             st.download_button(
@@ -915,8 +955,6 @@ else:
             st.warning(str(e))
 
         st.markdown(f"##### {T['stats']}")
-        import pandas as pd
-
         df = pd.DataFrame(check_rows)
         st.dataframe(
             df.style.map(style_percentile_col, subset=["Percentile"]),
