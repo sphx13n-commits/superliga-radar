@@ -226,7 +226,7 @@ try:
         f"{base_url}/squads/seasons/{season_id}/teams/{selected_team_id}",
         headers=headers,
         params={**params, "include": "player.statistics.details"},
-        timeout=15,
+        timeout=30,
     )
     squad_data = squad_res.json()
 
