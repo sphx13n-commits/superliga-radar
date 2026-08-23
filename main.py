@@ -188,7 +188,7 @@ try:
         f"{base_url}/teams/seasons/{season_id}",
         headers=headers,
         params=params,
-        timeout=15,
+        timeout=30,
     )
     teams_data = teams_res.json()
 
