@@ -17,7 +17,7 @@ BG = "#EEF2F7"
 WHITE = "#FFFFFF"
 CARD_BORDER = "#D0DAE6"
 
-# Fixture詳細での出場時間 type_id（実測: cumulative-minutes-played）
+# 実測: Fixture details の出場時間
 MINUTES_TYPE_ID = 117172
 
 _, language_column = st.columns([4, 1])
@@ -40,15 +40,13 @@ TEXT = {
     "minute_filter": "Minutes filter" if is_english else "出場時間",
     "no_team": "No teams found" if is_english else "チームが見つかりません",
     "team_list": " squad" if is_english else "の選手一覧",
-    "save_hint": "Long-press the image to save."
-    if is_english
-    else "下の画像を長押しすると保存できます。",
+    "save_hint": "Long-press to save." if is_english else "長押しで保存できます。",
     "download": "Download PNG" if is_english else "PNGをダウンロード",
-    "no_players": "No players found" if is_english else "選手データがありません",
-    "no_stats": "No stats available" if is_english else "この選手のスタッツがありません",
-    "all_stats": "Season API stats" if is_english else "シーズンAPIの指標（確認用）",
-    "per90_note": "Per 90 minutes." if is_english else "90分あたり。",
-    "description": "Superliga player radar" if is_english else "スーペルリーガの選手レーダー",
+    "no_players": "No players" if is_english else "選手データがありません",
+    "no_stats": "No stats" if is_english else "この選手のスタッツがありません",
+    "all_stats": "Season API stats" if is_english else "シーズンAPIの指標",
+    "per90_note": "Per 90." if is_english else "90分あたり。",
+    "description": "Superliga radar" if is_english else "スーペルリーガの選手レーダー",
 }
 
 st.markdown(
@@ -83,42 +81,30 @@ season_id = default_season_id
 KNOWN_NAMES = {
     42: ("Shots total", "シュート合計"),
     52: ("Goals", "ゴール"),
-    56: ("Fouls", "ファウル"),
-    57: ("Saves", "セーブ"),
     78: ("Tackles", "タックル"),
     79: ("Assists", "アシスト"),
     80: ("Passes", "パス"),
     86: ("Shots on target", "枠内シュート"),
     100: ("Interceptions", "インターセプト"),
     101: ("Clearances", "クリア"),
-    105: ("Total duels", "デュエル"),
-    106: ("Duels won", "デュエル勝利"),
     107: ("Aerials won", "空中戦勝利"),
-    108: ("Dribble attempts", "ドリブル試行"),
     109: ("Successful dribbles", "ドリブル成功"),
     116: ("Accurate passes", "成功パス"),
     117: ("Key passes", "キーパス"),
-    118: ("Rating", "レーティング"),
     119: ("Minutes (season)", "出場時間(シーズン)"),
-    120: ("Touches", "タッチ"),
-    122: ("Long balls", "ロングボール"),
-    1584: ("Pass accuracy %", "パス成功率"),
+    MINUTES_TYPE_ID: ("Minutes (fixture)", "出場時間(試合)"),
     194: ("Clean sheets", "無失点"),
     214: ("Team wins", "勝利"),
     215: ("Team draws", "引き分け"),
     216: ("Team losses", "敗戦"),
     321: ("Appearances", "出場数"),
     322: ("Lineups", "先発数"),
-    27271: ("Ball recovery", "ボール回収"),
-    MINUTES_TYPE_ID: ("Minutes (fixture)", "出場時間(試合)"),
 }
-
 RADAR_ORDER = [52, 79, 42, 78, 100, 101, 107, 109]
 POSITION_MAP = {24: "GK", 25: "DEF", 26: "MID", 27: "FWD"}
 
 
 def get_total_value(detail):
-    """シーズンAPI用: value 優先、なければ data"""
     for key in ("value", "data"):
         value = detail.get(key)
         if value is None:
@@ -163,9 +149,7 @@ def calc_age(date_of_birth):
 
 def get_position_label(player):
     pid = player.get("position_id")
-    if pid in POSITION_MAP:
-        return POSITION_MAP[pid]
-    return "MID"
+    return POSITION_MAP.get(pid, "MID")
 
 
 def known_name(type_id):
@@ -419,7 +403,6 @@ try:
             try:
                 png = fig.to_image(format="png", width=900, height=1180, scale=2)
                 st.image(png, use_container_width=True)
-                st.caption(TEXT["per90_note"] + " ※上部はシーズンAPI（暫定）")
                 st.download_button(
                     TEXT["download"],
                     data=png,
@@ -436,14 +419,13 @@ except Exception as e:
 
 
 # ============================================================
-# Aggregate Prototype
-# minutes = type_id 117172 (cumulative-minutes-played)
-# 数値は detail["data"] から取得
+# Aggregate Prototype v2
+# 同一チーム（AGF優先）の複数試合で合算検証
 # ============================================================
 st.divider()
-st.subheader("Aggregate Prototype（一時）")
+st.subheader("Aggregate Prototype v2（複数試合合算の検証）")
 st.caption(
-    f"出場時間 = type_id {MINUTES_TYPE_ID} (cumulative-minutes-played) / 数値は data から"
+    "同一チームの終了試合を最大5試合取得し、同じ player_id の合算を検証します。"
 )
 
 _proto_token = os.getenv("SPORTMONKS_TOKEN")
@@ -452,6 +434,20 @@ if _proto_token:
     _headers = {"Authorization": _proto_token}
     _params = {"api_token": _proto_token}
     _POS = {24: "GK", 25: "DEF", 26: "MID", 27: "FWD"}
+
+    # 主要指標
+    TRACK_IDS = {
+        52: "Goals",
+        42: "Shots",
+        80: "Passes",
+        116: "Accurate Passes",
+        117: "Key Passes",
+        78: "Tackles",
+        100: "Interceptions",
+        101: "Clearances",
+        107: "Aerials Won",
+        109: "Succ. Dribbles",
+    }
 
     def _deep_num(obj):
         if obj is None or isinstance(obj, bool):
@@ -492,7 +488,6 @@ if _proto_token:
     def _extract_stat(detail):
         if not isinstance(detail, dict):
             return None
-        # 実測: Fixture details は data に数値が入る
         for key in ("data", "value", "values"):
             if key in detail:
                 n = _deep_num(detail[key])
@@ -502,163 +497,391 @@ if _proto_token:
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        start_d = st.text_input("開始日", value="2026-08-01", key="proto_start")
+        start_d = st.text_input("開始日", value="2026-07-20", key="proto_start")
     with c2:
-        end_d = st.text_input("終了日", value="2026-08-15", key="proto_end")
+        end_d = st.text_input("終了日", value="2026-08-20", key="proto_end")
     with c3:
         max_fx = st.number_input(
-            "最大試合数", min_value=1, max_value=5, value=4, key="proto_max"
+            "最大試合数", min_value=2, max_value=5, value=5, key="proto_max"
         )
 
-    if st.button("3〜5試合を集計する", key="proto_run"):
+    focus_team = st.text_input(
+        "優先チーム名（部分一致）",
+        value="AGF",
+        key="proto_team",
+        help="この名前を含む試合を優先して選びます",
+    )
+
+    if st.button("同一チームの複数試合を集計する", key="proto_run"):
         try:
             between_res = requests.get(
                 f"{_base}/fixtures/between/{start_d}/{end_d}",
                 headers=_headers,
-                params={**_params, "filters": "fixtureLeagues:271"},
-                timeout=30,
+                params={
+                    **_params,
+                    "filters": "fixtureLeagues:271",
+                    "include": "participants",
+                },
+                timeout=40,
             )
             between_json = between_res.json()
             if between_res.status_code != 200:
                 st.error(f"between 失敗: {between_res.status_code}")
             else:
-                selected = (between_json.get("data") or [])[: int(max_fx)]
-                st.write(f"使用Fixture数: {len(selected)}")
+                all_fx = between_json.get("data") or []
+                focus = (focus_team or "").strip().lower()
 
-                fixture_rows = []
-                aggs = {}
+                def involves_focus(fx):
+                    name = (fx.get("name") or "").lower()
+                    if focus and focus in name:
+                        return True
+                    for p in fx.get("participants") or []:
+                        pn = (p.get("name") or "").lower()
+                        if focus and focus in pn:
+                            return True
+                    return False
 
-                for fx in selected:
-                    fid = fx.get("id")
-                    fname = fx.get("name") or str(fid)
-                    fdate = (fx.get("starting_at") or "")[:10]
-                    fixture_rows.append(
-                        {"fixture_id": fid, "match": fname, "date": fdate}
+                focused = [fx for fx in all_fx if involves_focus(fx)]
+                # 日付順
+                focused.sort(key=lambda x: x.get("starting_at") or "")
+                others = [fx for fx in all_fx if fx not in focused]
+                others.sort(key=lambda x: x.get("starting_at") or "")
+
+                selected = focused[: int(max_fx)]
+                if len(selected) < int(max_fx):
+                    selected += others[: int(max_fx) - len(selected)]
+
+                st.write(
+                    f"期間内ヒット: {len(all_fx)} / "
+                    f"『{focus_team}』関連: {len(focused)} / "
+                    f"使用: {len(selected)}"
+                )
+                if len(focused) < 2:
+                    st.warning(
+                        f"『{focus_team}』の試合が2未満です。"
+                        "開始日を広げると複数試合合算を検証しやすくなります。"
                     )
 
-                    fr = requests.get(
-                        f"{_base}/fixtures/{fid}",
-                        headers=_headers,
-                        params={**_params, "include": "lineups.details.type"},
-                        timeout=40,
-                    )
-                    if fr.status_code != 200:
-                        st.warning(f"{fid} 失敗: {fr.status_code}")
-                        continue
+                if not selected:
+                    st.warning("試合がありません。")
+                else:
+                    fixture_rows = []
+                    # player_id -> agg
+                    # per_fixture: list of {fixture_id, match, minutes, stats..., lineup_type}
+                    aggs = {}
+                    minutes_type_codes = {}  # type_id -> code（分関連の探索）
 
-                    lineups = ((fr.json() or {}).get("data") or {}).get("lineups") or []
-                    st.caption(f"fixture {fid}: lineups={len(lineups)} / {fname}")
+                    for fx in selected:
+                        fid = fx.get("id")
+                        fname = fx.get("name") or str(fid)
+                        fdate = (fx.get("starting_at") or "")[:10]
+                        fixture_rows.append(
+                            {"fixture_id": fid, "match": fname, "date": fdate}
+                        )
 
-                    for lu in lineups:
-                        pid = lu.get("player_id")
-                        if not pid:
+                        fr = requests.get(
+                            f"{_base}/fixtures/{fid}",
+                            headers=_headers,
+                            params={**_params, "include": "lineups.details.type"},
+                            timeout=40,
+                        )
+                        if fr.status_code != 200:
+                            st.warning(f"{fid} 失敗: {fr.status_code}")
                             continue
-                        pname = (
-                            (lu.get("player") or {}).get("name")
-                            or lu.get("player_name")
-                            or f"id:{pid}"
+
+                        lineups = (
+                            ((fr.json() or {}).get("data") or {}).get("lineups") or []
                         )
-                        pos_id = lu.get("position_id") or (
-                            (lu.get("player") or {}).get("position_id")
+                        st.caption(
+                            f"fixture {fid}: lineups={len(lineups)} / {fname}"
                         )
-                        details = lu.get("details") or []
 
-                        if pid not in aggs:
-                            aggs[pid] = {
-                                "player_name": pname,
-                                "position_id": pos_id,
-                                "minutes": 0.0,
-                                "raw": {},
-                                "fixture_count": 0,
-                            }
-                        else:
-                            if pname and str(aggs[pid]["player_name"]).startswith("id:"):
-                                aggs[pid]["player_name"] = pname
-                            if pos_id and not aggs[pid]["position_id"]:
-                                aggs[pid]["position_id"] = pos_id
-
-                        aggs[pid]["fixture_count"] += 1
-
-                        for d in details:
-                            tid = d.get("type_id")
-                            if tid is None:
+                        for lu in lineups:
+                            pid = lu.get("player_id")
+                            if not pid:
                                 continue
-                            parsed = _extract_stat(d)
-                            if parsed is None:
-                                continue
-                            if tid == MINUTES_TYPE_ID:
-                                aggs[pid]["minutes"] += parsed
+                            pname = (
+                                (lu.get("player") or {}).get("name")
+                                or lu.get("player_name")
+                                or f"id:{pid}"
+                            )
+                            pos_id = lu.get("position_id") or (
+                                (lu.get("player") or {}).get("position_id")
+                            )
+                            # 11=先発, 12=ベンチ が多い
+                            lineup_type = lu.get("type_id")
+                            details = lu.get("details") or []
+
+                            if pid not in aggs:
+                                aggs[pid] = {
+                                    "player_id": pid,
+                                    "player_name": pname,
+                                    "position_id": pos_id,
+                                    "minutes": 0.0,
+                                    "raw": {},
+                                    "fixture_count": 0,
+                                    "per_fixture": [],
+                                }
                             else:
-                                aggs[pid]["raw"][tid] = (
-                                    aggs[pid]["raw"].get(tid, 0.0) + parsed
+                                if pname and str(aggs[pid]["player_name"]).startswith(
+                                    "id:"
+                                ):
+                                    aggs[pid]["player_name"] = pname
+                                if pos_id and not aggs[pid]["position_id"]:
+                                    aggs[pid]["position_id"] = pos_id
+
+                            fx_stats = {tid: 0.0 for tid in TRACK_IDS}
+                            fx_minutes = 0.0
+
+                            for d in details:
+                                tid = d.get("type_id")
+                                if tid is None:
+                                    continue
+                                t = d.get("type") or {}
+                                code = (t.get("code") or "").lower()
+                                name = (t.get("name") or "").lower()
+                                # 分関連 type を記録
+                                if (
+                                    "minute" in code
+                                    or "minute" in name
+                                    or tid in (119, MINUTES_TYPE_ID, 321, 322)
+                                ):
+                                    minutes_type_codes[tid] = (
+                                        t.get("code") or t.get("name") or str(tid)
+                                    )
+
+                                parsed = _extract_stat(d)
+                                if parsed is None:
+                                    continue
+                                if tid == MINUTES_TYPE_ID:
+                                    fx_minutes += parsed
+                                elif tid in TRACK_IDS:
+                                    fx_stats[tid] = fx_stats.get(tid, 0.0) + parsed
+                                # 合算用 raw（全type）
+                                if tid != MINUTES_TYPE_ID:
+                                    aggs[pid]["raw"][tid] = (
+                                        aggs[pid]["raw"].get(tid, 0.0) + parsed
+                                    )
+
+                            # 出場があった／スタッツがある選手のみ fixture カウント
+                            if fx_minutes > 0 or any(v > 0 for v in fx_stats.values()):
+                                aggs[pid]["fixture_count"] += 1
+                                aggs[pid]["minutes"] += fx_minutes
+                                aggs[pid]["per_fixture"].append(
+                                    {
+                                        "fixture_id": fid,
+                                        "match": fname,
+                                        "date": fdate,
+                                        "minutes_117172": fx_minutes,
+                                        "lineup_type_id": lineup_type,
+                                        "lineup_role": (
+                                            "start"
+                                            if lineup_type == 11
+                                            else "bench"
+                                            if lineup_type == 12
+                                            else str(lineup_type)
+                                        ),
+                                        **{
+                                            TRACK_IDS[tid]: fx_stats.get(tid, 0.0)
+                                            for tid in TRACK_IDS
+                                        },
+                                    }
                                 )
 
-                st.markdown("#### ① 使用したFixture一覧")
-                st.dataframe(fixture_rows, use_container_width=True, hide_index=True)
-
-                st.markdown(f"#### ② 集計した選手数: **{len(aggs)}**")
-                with_mins = sum(1 for a in aggs.values() if a["minutes"] > 0)
-                st.caption(
-                    f"Minutes > 0: **{with_mins}** 人 "
-                    f"（type_id {MINUTES_TYPE_ID} cumulative-minutes-played）"
-                )
-
-                sample = []
-                for a in aggs.values():
-                    mins = a["minutes"]
-                    raw = a["raw"]
-                    pos = _POS.get(a["position_id"], a["position_id"])
-
-                    def per90(tid):
-                        if mins <= 0:
-                            return None
-                        return round(raw.get(tid, 0.0) * 90.0 / mins, 2)
-
-                    passes = raw.get(80, 0.0)
-                    acc = raw.get(116, 0.0)
-                    pass_pct = (
-                        round(acc / passes * 100.0, 1) if passes > 0 else None
+                    # ① Fixture一覧
+                    st.markdown("#### ① 使用Fixture一覧")
+                    st.dataframe(
+                        fixture_rows, use_container_width=True, hide_index=True
                     )
 
-                    sample.append(
-                        {
-                            "Player": a["player_name"],
-                            "Pos": pos,
-                            "position_id": a["position_id"],
-                            "Minutes": int(round(mins)),
-                            "Fixtures": a["fixture_count"],
-                            "Goals/90": per90(52),
-                            "Shots/90": per90(42),
-                            "Passes/90": per90(80),
-                            "Pass Acc %": pass_pct,
-                            "Key Passes/90": per90(117),
-                            "Tackles/90": per90(78),
-                            "Intercepts/90": per90(100),
-                            "Clearances/90": per90(101),
-                            "Aerials/90": per90(107),
-                            "Succ. Dribbles/90": per90(109),
-                            "Ball Recovery/90": per90(27271),
-                            "raw_passes": int(passes) if passes else 0,
-                            "raw_acc_passes": int(acc) if acc else 0,
-                        }
+                    # ② lineups数は caption 済み
+
+                    # ③ 複数Fixture選手
+                    multi = [
+                        a for a in aggs.values() if len(a["per_fixture"]) >= 2
+                    ]
+                    multi.sort(
+                        key=lambda a: len(a["per_fixture"]), reverse=True
+                    )
+                    st.markdown(
+                        f"#### ③ 複数Fixtureに出場した選手数: **{len(multi)}**"
                     )
 
-                sample.sort(key=lambda x: x["Minutes"], reverse=True)
+                    # Minutes関連 type 一覧
+                    st.markdown("#### Minutes関連 type_id（この取得分で出現）")
+                    if minutes_type_codes:
+                        st.write(
+                            [
+                                {"type_id": k, "code": v}
+                                for k, v in sorted(minutes_type_codes.items())
+                            ]
+                        )
+                    else:
+                        st.write("分関連 type が検出できませんでした")
 
-                st.markdown("#### ③ Player Season Aggregate サンプル")
-                st.caption(
-                    "Pass Acc % = Σ Accurate Passes(116) ÷ Σ Passes(80) × 100"
-                )
-                st.dataframe(sample[:40], use_container_width=True, hide_index=True)
+                    if not multi:
+                        st.error(
+                            "複数試合出場選手が0人です。"
+                            "日付範囲を広げるか、優先チーム名を確認してください。"
+                        )
+                    else:
+                        st.markdown("#### ④ Aggregate検証対象（複数試合選手）")
+                        summary_rows = []
+                        for a in multi[:15]:
+                            summary_rows.append(
+                                {
+                                    "Player": a["player_name"],
+                                    "player_id": a["player_id"],
+                                    "Pos": _POS.get(
+                                        a["position_id"], a["position_id"]
+                                    ),
+                                    "Fixture数": len(a["per_fixture"]),
+                                    "Minutes合計(117172)": int(
+                                        round(a["minutes"])
+                                    ),
+                                    "各試合Minutes": " + ".join(
+                                        str(int(round(p["minutes_117172"])))
+                                        for p in a["per_fixture"]
+                                    ),
+                                }
+                            )
+                        st.dataframe(
+                            summary_rows,
+                            use_container_width=True,
+                            hide_index=True,
+                        )
 
-                played = [s for s in sample if s["Minutes"] > 0]
-                st.markdown(f"#### Minutes>0 の選手: **{len(played)}** 人（上位）")
-                st.dataframe(played[:20], use_container_width=True, hide_index=True)
+                        # 上位3人を詳細検証
+                        st.markdown(
+                            "#### 詳細検証（複数試合選手 最大5人）"
+                        )
+                        for a in multi[:5]:
+                            st.markdown(
+                                f"**{a['player_name']}** "
+                                f"(player_id={a['player_id']}, "
+                                f"fixtures={len(a['per_fixture'])})"
+                            )
+                            # Fixtureごと
+                            fx_table = []
+                            manual_sum = {TRACK_IDS[t]: 0.0 for t in TRACK_IDS}
+                            manual_min = 0.0
+                            for p in a["per_fixture"]:
+                                row = {
+                                    "fixture_id": p["fixture_id"],
+                                    "match": p["match"],
+                                    "role": p["lineup_role"],
+                                    "Minutes_117172": p["minutes_117172"],
+                                }
+                                for tid, label in TRACK_IDS.items():
+                                    row[label] = p.get(label, 0.0)
+                                    manual_sum[label] += p.get(label, 0.0)
+                                manual_min += p["minutes_117172"]
+                                fx_table.append(row)
+                            st.dataframe(
+                                fx_table,
+                                use_container_width=True,
+                                hide_index=True,
+                            )
 
-                multi = [s for s in sample if s["Fixtures"] >= 2]
-                st.markdown(f"複数試合の選手: **{len(multi)}** 人")
-                if multi:
-                    st.dataframe(multi[:10], use_container_width=True, hide_index=True)
+                            # Aggregate との一致
+                            raw = a["raw"]
+                            agg_check = {
+                                "Minutes合計_117172": round(a["minutes"], 2),
+                                "手動Minutes合計": round(manual_min, 2),
+                                "一致_Minutes": abs(a["minutes"] - manual_min)
+                                < 0.01,
+                            }
+                            for tid, label in TRACK_IDS.items():
+                                agg_v = raw.get(tid, 0.0)
+                                man_v = manual_sum[label]
+                                agg_check[f"Agg_{label}"] = agg_v
+                                agg_check[f"手動_{label}"] = man_v
+                                agg_check[f"一致_{label}"] = (
+                                    abs(agg_v - man_v) < 0.01
+                                )
+
+                            mins = a["minutes"]
+                            passes = raw.get(80, 0.0)
+                            acc = raw.get(116, 0.0)
+                            pass_pct = (
+                                round(acc / passes * 100.0, 2)
+                                if passes > 0
+                                else None
+                            )
+                            per90_goals = (
+                                round(raw.get(52, 0.0) * 90 / mins, 2)
+                                if mins > 0
+                                else None
+                            )
+                            per90_passes = (
+                                round(passes * 90 / mins, 2)
+                                if mins > 0
+                                else None
+                            )
+
+                            st.write(
+                                {
+                                    **agg_check,
+                                    "Pass Acc % (Σ116/Σ80)": pass_pct,
+                                    "Goals/90": per90_goals,
+                                    "Passes/90": per90_passes,
+                                }
+                            )
+                            st.caption(
+                                "117172 の各試合値と合計を確認。"
+                                "通常リーグ戦で90超が出る場合は、"
+                                "プレー時間以外（累計等）の可能性があるため要注記。"
+                            )
+
+                        # 全体 Aggregate 表（Minutes>0）
+                        sample = []
+                        for a in aggs.values():
+                            if a["minutes"] <= 0 and not a["per_fixture"]:
+                                continue
+                            mins = a["minutes"]
+                            raw = a["raw"]
+
+                            def p90(tid):
+                                if mins <= 0:
+                                    return None
+                                return round(
+                                    raw.get(tid, 0.0) * 90.0 / mins, 2
+                                )
+
+                            passes = raw.get(80, 0.0)
+                            acc = raw.get(116, 0.0)
+                            sample.append(
+                                {
+                                    "Player": a["player_name"],
+                                    "player_id": a["player_id"],
+                                    "Pos": _POS.get(
+                                        a["position_id"], a["position_id"]
+                                    ),
+                                    "Fixtures": len(a["per_fixture"]),
+                                    "Minutes": int(round(mins)),
+                                    "Goals/90": p90(52),
+                                    "Shots/90": p90(42),
+                                    "Passes/90": p90(80),
+                                    "Pass Acc %": (
+                                        round(acc / passes * 100.0, 1)
+                                        if passes > 0
+                                        else None
+                                    ),
+                                    "Key Passes/90": p90(117),
+                                    "Tackles/90": p90(78),
+                                    "Intercepts/90": p90(100),
+                                }
+                            )
+                        sample.sort(
+                            key=lambda x: (x["Fixtures"], x["Minutes"]),
+                            reverse=True,
+                        )
+                        st.markdown("#### 全体 Aggregate（Fixtures多い順）")
+                        st.dataframe(
+                            sample[:30],
+                            use_container_width=True,
+                            hide_index=True,
+                        )
 
         except Exception as e:
             st.error(f"Prototype エラー: {e}")
