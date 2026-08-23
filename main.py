@@ -8,14 +8,15 @@ import streamlit as st
 
 st.set_page_config(page_title="Superliga Radar", layout="centered")
 
-# ===== 色（紺×白） =====
+# ===== 色 =====
 NAVY = "#0B1F3A"
-NAVY_MID = "#1A3358"
-NAVY_SOFT = "rgba(11, 31, 58, 0.32)"
-GRID = "#C9D4E3"
-AXIS = "#7E93AD"
-BG = "#F7F9FC"
+NAVY_MID = "#16325C"
+NAVY_SOFT = "rgba(11, 31, 58, 0.38)"
+GRID = "#B8C7D9"
+AXIS = "#6B82A0"
+BG = "#EEF2F7"
 WHITE = "#FFFFFF"
+CARD_BORDER = "#D0DAE6"
 
 _, language_column = st.columns([4, 1])
 with language_column:
@@ -44,23 +45,34 @@ TEXT = {
     "team_list": " squad" if is_english else "の選手一覧",
     "target_players": "Shown" if is_english else "対象選手",
     "all_players": "total" if is_english else "全",
-    "player_chart": "Radar" if is_english else "レーダー",
-    "stats": "per 90" if is_english else "90分あたり",
-    "per90_note": "Values are per 90 minutes. Missing stats are shown as 0."
+    "per90_note": "Values are per 90 minutes. Missing stats = 0."
     if is_english
-    else "数値は90分あたりです。データがない指標は0で表示します。",
-    "player_name": "Player" if is_english else "選手",
-    "minutes": "Minutes" if is_english else "出場時間",
+    else "数値は90分あたり。データなしは0表示。",
     "download": "Download PNG" if is_english else "画像をダウンロード",
     "no_players": "No players found" if is_english else "選手データがありません",
     "no_stats": "No stats available" if is_english else "この選手のスタッツがありません",
+    "compared": "Compared to Superliga players (raw per90)"
+    if is_english
+    else "Superliga選手の per90 比較（絶対値）",
 }
+
+# 余白を全体的に詰める
+st.markdown(
+    """
+    <style>
+      .block-container { padding-top: 1rem; padding-bottom: 1.5rem; }
+      div[data-testid="stVerticalBlock"] > div { gap: 0.4rem; }
+      .stPlotlyChart { margin-top: -0.6rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 st.markdown(
     f"""
-    <div style="background:{NAVY};padding:18px 16px 14px;border-radius:12px;margin-bottom:18px;">
-      <div style="color:white;font-size:28px;font-weight:700;letter-spacing:0.5px;">Superliga Radar</div>
-      <div style="color:#C9D4E3;font-size:13px;margin-top:4px;">{TEXT["description"]}</div>
+    <div style="background:{NAVY};padding:16px 16px 12px;border-radius:12px;margin-bottom:12px;">
+      <div style="color:white;font-size:26px;font-weight:750;letter-spacing:0.3px;">Superliga Radar</div>
+      <div style="color:#C9D4E3;font-size:12px;margin-top:3px;">{TEXT["description"]}</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -108,11 +120,7 @@ def get_total_value(detail):
 
 
 def get_season_statistics(player):
-    return [
-        s
-        for s in player.get("statistics", [])
-        if s.get("season_id") == season_id
-    ]
+    return [s for s in player.get("statistics", []) if s.get("season_id") == season_id]
 
 
 def get_minutes(player):
@@ -186,7 +194,7 @@ try:
         st.stop()
 
     st.success(TEXT["connected"])
-    st.caption(f"{TEXT['season']}: {season_name}  /  {TEXT['season_id']}: {season_id}")
+    st.caption(f"{TEXT['season']}: {season_name}  /  ID: {season_id}")
 
     teams = teams_data.get("data", [])
     if not teams:
@@ -194,9 +202,7 @@ try:
         st.stop()
 
     team_options = {
-        team.get("name", "Unknown"): team.get("id")
-        for team in teams
-        if team.get("id")
+        team.get("name", "Unknown"): team.get("id") for team in teams if team.get("id")
     }
     selected_team_name = st.selectbox(TEXT["team_select"], sorted(team_options))
     selected_team_id = team_options[selected_team_name]
@@ -223,7 +229,13 @@ try:
         TEXT["minute_filter"],
         options=[900, 600, 300, 0],
         format_func=lambda v: (
-            f"{v}+ min" if is_english and v else "Any" if is_english else f"{v}分以上" if v else "指定なし"
+            f"{v}+ min"
+            if is_english and v
+            else "Any"
+            if is_english
+            else f"{v}分以上"
+            if v
+            else "指定なし"
         ),
     )
     players = [
@@ -241,9 +253,7 @@ try:
         st.info(TEXT["no_players"])
         st.stop()
 
-    player_options = {
-        p["name"]: p["id"] for p in players if p.get("id")
-    }
+    player_options = {p["name"]: p["id"] for p in players if p.get("id")}
     selected_player_name = st.selectbox(TEXT["player_select"], sorted(player_options))
     selected_player = next(
         p for p in players if p.get("id") == player_options[selected_player_name]
@@ -271,15 +281,32 @@ try:
         display_values = [round(v * 90 / minutes, 2) for v in raw_values]
         scale_label = "per90"
     else:
-        display_values = raw_values
+        display_values = list(raw_values)
         scale_label = "raw"
 
+    # ===== 選手カード（レポート風・密） =====
     st.markdown(
         f"""
-        <div style="border:1px solid #D6DEE8;border-radius:12px;padding:14px 16px;background:{BG};margin:8px 0 12px;">
-          <div style="font-size:22px;font-weight:700;color:{NAVY};">{selected_player_name}</div>
-          <div style="font-size:13px;color:{AXIS};margin-top:4px;">
-            {selected_team_name}　·　{minutes}{" min" if is_english else "分"}　·　{scale_label}
+        <div style="
+            background: linear-gradient(180deg, {WHITE} 0%, {BG} 100%);
+            border: 1px solid {CARD_BORDER};
+            border-left: 5px solid {NAVY};
+            border-radius: 10px;
+            padding: 12px 14px 10px;
+            margin: 4px 0 2px;
+        ">
+          <div style="font-size:24px;font-weight:800;color:{NAVY};line-height:1.15;">
+            {selected_player_name}
+          </div>
+          <div style="margin-top:6px;font-size:13px;color:{AXIS};font-weight:600;">
+            {selected_team_name}
+            <span style="margin:0 6px;color:#B0BEC8;">|</span>
+            {minutes}{" min" if is_english else "分"}
+            <span style="margin:0 6px;color:#B0BEC8;">|</span>
+            {scale_label}
+          </div>
+          <div style="margin-top:4px;font-size:11px;color:#8A9BB0;">
+            {TEXT["compared"]}
           </div>
         </div>
         """,
@@ -291,39 +318,58 @@ try:
     else:
         chart_labels = labels + [labels[0]]
         chart_values = display_values + [display_values[0]]
-        radial_max = max(max(display_values) * 1.2, 1.0)
+        radial_max = max(max(display_values) * 1.15, 1.0)
 
-        fig = go.Figure(
+        # 値ラベル（レポート感）
+        value_text = [f"{v}" for v in display_values]
+
+        fig = go.Figure()
+        fig.add_trace(
             go.Scatterpolar(
                 r=chart_values,
                 theta=chart_labels,
                 fill="toself",
                 fillcolor=NAVY_SOFT,
-                line={"color": NAVY, "width": 4},
+                line={"color": NAVY, "width": 3.5},
                 marker={
                     "color": WHITE,
-                    "size": 9,
-                    "line": {"color": NAVY, "width": 2},
+                    "size": 10,
+                    "line": {"color": NAVY, "width": 2.5},
                 },
                 mode="lines+markers",
+                hovertemplate="%{theta}: %{r}<extra></extra>",
+                name="",
             )
         )
+        # 各軸の数値を小さく表示
+        fig.add_trace(
+            go.Scatterpolar(
+                r=[v * 1.02 for v in display_values],
+                theta=labels,
+                mode="text",
+                text=value_text,
+                textfont={"size": 11, "color": NAVY, "family": "Arial"},
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+
         fig.update_layout(
-            height=760,
-            margin={"l": 60, "r": 60, "t": 30, "b": 120},
+            height=620,
+            margin={"l": 48, "r": 48, "t": 8, "b": 72},
             paper_bgcolor=WHITE,
             plot_bgcolor=WHITE,
-            font={"color": NAVY, "size": 13, "family": "Arial, sans-serif"},
+            font={"color": NAVY, "size": 12, "family": "Arial, sans-serif"},
             showlegend=False,
             images=[
                 {
                     "source": get_logo_data_uri(),
                     "xref": "paper",
                     "yref": "paper",
-                    "x": 0.98,
-                    "y": 0.01,
-                    "sizex": 0.11,
-                    "sizey": 0.11,
+                    "x": 0.99,
+                    "y": 0.0,
+                    "sizex": 0.10,
+                    "sizey": 0.10,
                     "xanchor": "right",
                     "yanchor": "bottom",
                     "sizing": "contain",
@@ -335,12 +381,12 @@ try:
                     "text": "@Dalaprospect",
                     "xref": "paper",
                     "yref": "paper",
-                    "x": 0.84,
-                    "y": 0.055,
+                    "x": 0.86,
+                    "y": 0.035,
                     "xanchor": "right",
                     "yanchor": "middle",
                     "showarrow": False,
-                    "font": {"color": NAVY, "size": 15},
+                    "font": {"color": NAVY, "size": 14},
                 }
             ],
             polar={
@@ -350,24 +396,29 @@ try:
                     "range": [0, radial_max],
                     "gridcolor": GRID,
                     "linecolor": AXIS,
-                    "tickfont": {"color": AXIS, "size": 11},
+                    "tickfont": {"color": AXIS, "size": 10},
                     "showline": True,
+                    "layer": "below traces",
                 },
                 "angularaxis": {
                     "gridcolor": GRID,
                     "linecolor": AXIS,
-                    "tickfont": {"color": NAVY, "size": 13},
+                    "tickfont": {"color": NAVY, "size": 12, "family": "Arial"},
                     "rotation": 90,
                     "direction": "clockwise",
                 },
             },
         )
 
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            config={"displayModeBar": False},
+        )
         st.caption(TEXT["per90_note"])
 
         try:
-            png_data = fig.to_image(format="png", width=900, height=1125, scale=2)
+            png_data = fig.to_image(format="png", width=900, height=1100, scale=2)
             st.download_button(
                 label=TEXT["download"],
                 data=png_data,
