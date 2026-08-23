@@ -74,7 +74,7 @@ st.markdown(
     <div style="background:{NAVY};padding:14px 16px 11px;border-radius:12px;margin-bottom:10px;">
       <div style="color:white;font-size:24px;font-weight:750;">Superliga Radar</div>
       <div style="color:#C9D4E3;font-size:12px;margin-top:2px;">
-        {"Fixture Aggregate based scouting radar" if is_en else "Fixture集計ベースのスカウティングレーダー"}
+        {"Fixture Aggregate scouting radar" if is_en else "Fixture集計ベースのスカウティングレーダー"}
       </div>
     </div>
     """,
@@ -83,7 +83,7 @@ st.markdown(
 
 token = os.getenv("SPORTMONKS_TOKEN")
 if not token:
-    st.error("トークンが見つかりません" if not is_en else "Token not found")
+    st.error("Token not found" if is_en else "トークンが見つかりません")
     st.stop()
 
 headers = {"Authorization": token}
@@ -285,6 +285,17 @@ def compute_metrics(raw, minutes, metric_defs):
     return out
 
 
+def _is_finished_fixture(fx):
+    state = fx.get("state") or {}
+    state_id = fx.get("state_id") or state.get("id")
+    name = (state.get("short_name") or state.get("name") or state.get("developer_name") or "").upper()
+    if state_id in (5, 7, 8):
+        return True
+    if name in ("FT", "FULL TIME", "FINISHED", "AET", "FT_PEN"):
+        return True
+    return bool(fx.get("result_info") or fx.get("scores"))
+
+
 # ----- season -----
 league_res = requests.get(
     f"{base_url}/leagues/{LEAGUE_ID}",
@@ -326,19 +337,12 @@ teams_res = requests.get(
 )
 teams = teams_res.json().get("data", []) if teams_res.status_code == 200 else []
 team_id_to_name = {t.get("id"): t.get("name") for t in teams if t.get("id")}
+st.success("Connected" if is_en else "Sportmonksに接続できました")
+st.caption(f"{'Season' if is_en else 'シーズン'}: {season_name}")
 
-st.success("Sportmonksに接続できました" if not is_en else "Connected")
-st.caption(f"{'シーズン' if not is_en else 'Season'}: {season_name}")
 
-
-# ----- fixture helpers -----
-def fetch_season_fixtures(sid, season_meta_row, force_refresh=False):
-    cdir = _cache_dir(sid)
-    list_path = cdir / "fixtures_list.json"
-    if not force_refresh:
-        cached = _load_json(list_path)
-        if cached and cached.get("fixtures"):
-            return cached
+def fetch_season_fixtures_list(sid, season_meta_row):
+    """一覧は常に最新化（終了試合の発見用）。個別fixture詳細は別途。"""
     start = (season_meta_row.get("starting_at") or "2026-07-01")[:10]
     end = (season_meta_row.get("ending_at") or "2027-06-30")[:10]
     today = date.today().isoformat()
@@ -367,7 +371,7 @@ def fetch_season_fixtures(sid, season_meta_row, force_refresh=False):
         page += 1
         if page > 30:
             break
-        time.sleep(0.1)
+        time.sleep(0.08)
     finished = [fx for fx in all_fx if _is_finished_fixture(fx)]
     payload = {
         "season_id": sid,
@@ -376,22 +380,23 @@ def fetch_season_fixtures(sid, season_meta_row, force_refresh=False):
         "total_fetched": len(all_fx),
         "finished_count": len(finished),
         "list_errors": errors,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
         "fixtures": [
             {"id": fx.get("id"), "name": fx.get("name"), "starting_at": fx.get("starting_at")}
             for fx in finished
             if fx.get("id")
         ],
     }
-    _save_json(list_path, payload)
+    _save_json(_cache_dir(sid) / "fixtures_list.json", payload)
     return payload
 
 
-def fetch_fixture_details(sid, fixture_id, force_refresh=False):
+def load_fixture_detail(sid, fixture_id, force_refresh=False):
     path = _cache_dir(sid) / f"fixture_{fixture_id}.json"
-    if not force_refresh:
+    if not force_refresh and path.exists():
         cached = _load_json(path)
         if cached is not None:
-            return cached, False, None
+            return cached, "cache", None
     res = requests.get(
         f"{base_url}/fixtures/{fixture_id}",
         headers=headers,
@@ -399,11 +404,11 @@ def fetch_fixture_details(sid, fixture_id, force_refresh=False):
         timeout=45,
     )
     if res.status_code != 200:
-        return None, True, f"HTTP {res.status_code}"
+        return None, "error", f"HTTP {res.status_code}"
     data = (res.json() or {}).get("data")
     _save_json(path, data)
     time.sleep(0.08)
-    return data, True, None
+    return data, "api", None
 
 
 def aggregate_player_team(fixture_payloads, sid):
@@ -457,101 +462,205 @@ def aggregate_player_team(fixture_payloads, sid):
     return aggs
 
 
-# ----- build / load aggregate -----
+def restore_aggs_from_file(sid):
+    cached = _load_json(_cache_dir(sid) / "player_team_aggregate.json")
+    if not cached or not cached.get("players"):
+        return None, None
+    restored = {}
+    for p in cached["players"]:
+        key = f"{sid}_{p['player_id']}_{p['team_id']}"
+        restored[key] = {
+            "season_id": sid,
+            "player_id": p["player_id"],
+            "team_id": p["team_id"],
+            "player_name": p["player_name"],
+            "position_id": p.get("position_id"),
+            "minutes": float(p.get("minutes") or 0),
+            "apps": p.get("apps") or 0,
+            "raw": {int(k): v for k, v in (p.get("raw") or {}).items()},
+        }
+    meta = {
+        "fixtures": cached.get("fixtures"),
+        "players": len(restored),
+        "new_fetched": cached.get("new_fetched", 0),
+        "cached_fixtures": cached.get("cached_fixtures"),
+        "finished_fixtures": cached.get("finished_fixtures"),
+        "aggregate_rebuilt": cached.get("aggregate_rebuilt"),
+        "updated_at": cached.get("updated_at"),
+        "from_cache_file": True,
+    }
+    return restored, meta
+
+
+def save_aggs(sid, aggs, status):
+    rows_out = [
+        {
+            "player_id": a["player_id"],
+            "team_id": a["team_id"],
+            "player_name": a["player_name"],
+            "position_id": a["position_id"],
+            "minutes": a["minutes"],
+            "apps": a["apps"],
+            "raw": {str(k): v for k, v in a["raw"].items()},
+        }
+        for a in aggs.values()
+    ]
+    payload = {
+        "season_id": sid,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "players": rows_out,
+        **status,
+    }
+    _save_json(_cache_dir(sid) / "player_team_aggregate.json", payload)
+    return payload
+
+
+def incremental_update(sid, season_meta_row, force_all=False):
+    """
+    1) 終了Fixture一覧を最新化
+    2) 既存 fixture_*.json はスキップ
+    3) 新規のみAPI取得
+    4) 新規あり or Aggregateなし or force → Aggregate再構築
+    5) それ以外は既存Aggregate
+    """
+    cdir = _cache_dir(sid)
+    flist = fetch_season_fixtures_list(sid, season_meta_row)
+    finished_ids = [f["id"] for f in flist.get("fixtures", [])]
+    finished_count = len(finished_ids)
+
+    cached_ids = []
+    missing_ids = []
+    for fid in finished_ids:
+        path = cdir / f"fixture_{fid}.json"
+        if path.exists() and not force_all:
+            cached_ids.append(fid)
+        else:
+            missing_ids.append(fid)
+
+    loaded = []
+    new_fetched = 0
+    errors = []
+    # load cached
+    for fid in cached_ids:
+        data = _load_json(cdir / f"fixture_{fid}.json")
+        if data is not None:
+            loaded.append(data)
+    # fetch new only
+    prog = st.progress(0.0) if missing_ids else None
+    for i, fid in enumerate(missing_ids):
+        data, source, err = load_fixture_detail(sid, fid, force_refresh=force_all)
+        if err:
+            errors.append({"fixture_id": fid, "error": err})
+        elif data is not None:
+            loaded.append(data)
+            if source == "api":
+                new_fetched += 1
+        if prog:
+            prog.progress((i + 1) / max(len(missing_ids), 1))
+
+    agg_path = cdir / "player_team_aggregate.json"
+    need_rebuild = force_all or new_fetched > 0 or (not agg_path.exists()) or (len(loaded) == 0 and finished_count > 0 and not agg_path.exists())
+
+    # 既存Aggregateがあり新規0なら再構築しない
+    if not need_rebuild and agg_path.exists():
+        aggs, meta = restore_aggs_from_file(sid)
+        if aggs is not None:
+            status = {
+                "finished_fixtures": finished_count,
+                "cached_fixtures": len(cached_ids),
+                "new_fetched": 0,
+                "loaded_fixtures": len(loaded),
+                "errors": len(errors),
+                "aggregate_rebuilt": False,
+                "players": len(aggs),
+                "updated_at": meta.get("updated_at") if meta else None,
+                "mode": "incremental_skip_rebuild",
+            }
+            return aggs, status, errors
+
+    aggs = aggregate_player_team(loaded, sid)
+    status = {
+        "finished_fixtures": finished_count,
+        "cached_fixtures": len(cached_ids),
+        "new_fetched": new_fetched,
+        "loaded_fixtures": len(loaded),
+        "errors": len(errors),
+        "aggregate_rebuilt": True,
+        "players": len(aggs),
+        "fixtures": len(loaded),
+        "mode": "rebuild",
+    }
+    save_aggs(sid, aggs, status)
+    return aggs, status, errors
+
+
+# ----- UI: update controls -----
 c1, c2 = st.columns([2, 1])
 with c1:
-    force = st.checkbox("キャッシュ無視で再取得", value=False)
+    force_all = st.checkbox(
+        "全Fixtureを強制再取得（通常は不要）" if not is_en else "Force re-fetch all fixtures",
+        value=False,
+    )
 with c2:
-    min_min = st.selectbox("最低出場分", [0, 300, 600, 900], index=1)
+    min_min = st.selectbox("最低出場分" if not is_en else "Min minutes", [0, 300, 600, 900], index=1)
 
-if st.button("データ更新 / 構築", type="primary"):
-    with st.spinner("Fixture Aggregate 構築中..."):
-        flist = fetch_season_fixtures(season_id, season_info, force_refresh=force)
-        fx_ids = [f["id"] for f in flist.get("fixtures", [])]
-        loaded, api_hits, cache_hits, errors = [], 0, 0, []
-        prog = st.progress(0.0)
-        for i, fid in enumerate(fx_ids):
-            data, from_api, err = fetch_fixture_details(season_id, fid, force_refresh=force)
-            if err:
-                errors.append({"fixture_id": fid, "error": err})
-            elif data is not None:
-                loaded.append(data)
-                api_hits += int(from_api)
-                cache_hits += int(not from_api)
-            prog.progress((i + 1) / max(len(fx_ids), 1))
-        aggs = aggregate_player_team(loaded, season_id)
-        rows_out = [
-            {
-                "player_id": a["player_id"],
-                "team_id": a["team_id"],
-                "player_name": a["player_name"],
-                "position_id": a["position_id"],
-                "minutes": a["minutes"],
-                "apps": a["apps"],
-                "raw": {str(k): v for k, v in a["raw"].items()},
-            }
-            for a in aggs.values()
-        ]
-        _save_json(
-            _cache_dir(season_id) / "player_team_aggregate.json",
-            {
-                "season_id": season_id,
-                "fixtures": len(loaded),
-                "api_hits": api_hits,
-                "cache_hits": cache_hits,
-                "errors": len(errors),
-                "players": rows_out,
-            },
-        )
+run = st.button("データ更新（増分）" if not is_en else "Update data (incremental)", type="primary")
+
+if run:
+    with st.spinner("増分更新中..." if not is_en else "Incremental update..."):
+        aggs, status, errors = incremental_update(season_id, season_info, force_all=force_all)
         st.session_state.fx_aggs = aggs
-        st.session_state.fx_info = {
-            "fixtures": len(loaded),
-            "api_hits": api_hits,
-            "cache_hits": cache_hits,
-            "errors": len(errors),
-            "players": len(aggs),
-        }
-        st.success(
-            f"完了: fixtures={len(loaded)}, players={len(aggs)}, "
-            f"api={api_hits}, cache={cache_hits}, err={len(errors)}"
-        )
+        st.session_state.fx_status = status
+        st.session_state.fx_errors = errors
+        if status.get("aggregate_rebuilt"):
+            st.success(
+                f"Aggregate再構築 · 新規Fixture {status.get('new_fetched', 0)} · 選手 {status.get('players', 0)}"
+            )
+        else:
+            st.success(
+                f"新規なし · 既存Aggregateを使用 · 選手 {status.get('players', 0)}"
+            )
 
-# restore cache
+# auto restore on load
 if "fx_aggs" not in st.session_state or st.session_state.fx_aggs is None:
-    cached = _load_json(_cache_dir(season_id) / "player_team_aggregate.json")
-    if cached and cached.get("players"):
-        restored = {}
-        for p in cached["players"]:
-            key = f"{season_id}_{p['player_id']}_{p['team_id']}"
-            restored[key] = {
-                "season_id": season_id,
-                "player_id": p["player_id"],
-                "team_id": p["team_id"],
-                "player_name": p["player_name"],
-                "position_id": p.get("position_id"),
-                "minutes": float(p.get("minutes") or 0),
-                "apps": p.get("apps") or 0,
-                "raw": {int(k): v for k, v in (p.get("raw") or {}).items()},
-            }
-        st.session_state.fx_aggs = restored
-        st.session_state.fx_info = {
-            "fixtures": cached.get("fixtures"),
-            "players": len(restored),
-            "from_cache": True,
-        }
+    aggs, meta = restore_aggs_from_file(season_id)
+    if aggs is not None:
+        st.session_state.fx_aggs = aggs
+        st.session_state.fx_status = meta or {"from_cache_file": True, "players": len(aggs)}
+    else:
+        # キャッシュ無し → 自動で増分構築
+        with st.spinner("初回データ構築中..."):
+            aggs, status, errors = incremental_update(season_id, season_info, force_all=False)
+            st.session_state.fx_aggs = aggs
+            st.session_state.fx_status = status
+            st.session_state.fx_errors = errors
 
 aggs = st.session_state.get("fx_aggs")
+status = st.session_state.get("fx_status") or {}
+errors = st.session_state.get("fx_errors") or []
+
 if not aggs:
-    st.info("「データ更新 / 構築」を押して集計データを用意してください。")
+    st.warning("データがありません。「データ更新」を押してください。")
     st.stop()
 
-info = st.session_state.get("fx_info") or {}
-st.caption(
-    f"Fixtures: {info.get('fixtures', '-')} · Players: {len(aggs)} · "
-    f"api={info.get('api_hits', '-')} cache={info.get('cache_hits', info.get('from_cache', False))}"
-)
+with st.expander("データ更新ステータス" if not is_en else "Update status", expanded=False):
+    st.write(
+        {
+            "終了済みFixture数": status.get("finished_fixtures"),
+            "キャッシュ済みFixture数": status.get("cached_fixtures"),
+            "今回新規取得": status.get("new_fetched"),
+            "読込Fixture数": status.get("loaded_fixtures") or status.get("fixtures"),
+            "Aggregate再構築": status.get("aggregate_rebuilt"),
+            "選手数": status.get("players") or len(aggs),
+            "最終更新": status.get("updated_at"),
+            "mode": status.get("mode") or ("cache_file" if status.get("from_cache_file") else None),
+            "errors": status.get("errors") or len(errors),
+        }
+    )
+    if errors:
+        st.dataframe(errors, use_container_width=True, hide_index=True)
 
-# ----- filter & percentile -----
+# ----- percentile & UI (unchanged logic) -----
 by_pos = {p: [] for p in ("GK", "DEF", "MID", "FWD")}
 for a in aggs.values():
     mins = a["minutes"]
@@ -563,8 +672,6 @@ for a in aggs.values():
     metrics = compute_metrics(a["raw"], mins, POSITION_METRICS[pos])
     by_pos[pos].append(
         {
-            "player_id": a["player_id"],
-            "team_id": a["team_id"],
             "Player": a["player_name"],
             "Team": team_id_to_name.get(a["team_id"], a["team_id"]),
             "Pos": pos,
@@ -585,25 +692,22 @@ for pos, group in by_pos.items():
                 None if v is None else percentile_rank(vals, v, higher)
             )
 
-st.write(
-    {
-        "最低出場適用後": sum(len(v) for v in by_pos.values()),
-        "Percentile母集団": {p: len(by_pos[p]) for p in by_pos},
-    }
+st.caption(
+    f"Players(filter): {sum(len(v) for v in by_pos.values())} · "
+    f"GK{len(by_pos['GK'])}/DEF{len(by_pos['DEF'])}/MID{len(by_pos['MID'])}/FWD{len(by_pos['FWD'])}"
 )
 
-# team filter (optional)
 all_players = [g for pos in by_pos.values() for g in pos]
 teams_in = sorted({g["Team"] for g in all_players if g["Team"]})
 team_filter = st.selectbox(
     "チーム絞り込み" if not is_en else "Team filter",
-    ["すべて"] + teams_in if not is_en else ["All"] + teams_in,
+    (["すべて"] if not is_en else ["All"]) + teams_in,
 )
 if team_filter not in ("すべて", "All"):
     all_players = [g for g in all_players if g["Team"] == team_filter]
 
 if not all_players:
-    st.warning("該当選手がいません。最低出場分を下げてください。")
+    st.warning("該当選手がいません。")
     st.stop()
 
 all_players.sort(key=lambda g: (g["Team"], g["Player"]))
@@ -617,9 +721,7 @@ st.markdown(
     f"**{selected['Player']}** · {selected['Team']} · **{pos}** · {selected['Minutes']} min · Apps {selected['Apps']}"
 )
 
-# metric table
-check_rows = []
-radar_labels, radar_values = [], []
+check_rows, radar_labels, radar_values = [], [], []
 for m in mdefs:
     if m["kind"] in ("per90", "lower_better_per90"):
         raw_v = selected["raw"].get(m["tid"], 0)
@@ -639,7 +741,7 @@ for m in mdefs:
 
 st.dataframe(check_rows, use_container_width=True, hide_index=True)
 
-if any(v is not None for v in radar_values):
+if radar_labels:
     fig = build_radar_figure(
         radar_labels,
         radar_values,
@@ -653,12 +755,6 @@ if any(v is not None for v in radar_values):
     try:
         png = fig.to_image(format="png", width=900, height=1180, scale=2)
         st.image(png, use_container_width=True)
-        st.caption(
-            "レーダー軸 = 同ポジション内 Percentile（0–100）。"
-            "Goals Conceded / Fouls は低いほど高Percentile。"
-            if not is_en
-            else "Axes = within-position percentile (0–100). Conceded/Fouls inverted."
-        )
         st.download_button(
             "PNGをダウンロード" if not is_en else "Download PNG",
             data=png,
@@ -667,12 +763,3 @@ if any(v is not None for v in radar_values):
         )
     except Exception as e:
         st.warning(str(e))
-
-# ----- legacy kept (not deleted) -----
-with st.expander("旧シーズンAPIレーダー（参考・未削除）" if not is_en else "Legacy season API radar"):
-    st.caption(
-        "検証完了まで残しています。主UIは上の Fixture Aggregate レーダーです。"
-        if not is_en
-        else "Kept until cutover. Main UI uses Fixture Aggregate above."
-    )
-    st.info("主経路は Fixture Aggregate です。旧ロジックは参照用です。")
