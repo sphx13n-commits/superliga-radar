@@ -91,7 +91,6 @@ base_url = "https://api.sportmonks.com/v3/football"
 default_season_id = 27897
 season_id = default_season_id
 
-# 名前が分かるものだけ日本語/英語表示。未知のtype_idはそのまま出す
 KNOWN_NAMES = {
     40: ("Captain", "キャプテン"),
     41: ("Shots off target", "枠外シュート"),
@@ -105,30 +104,39 @@ KNOWN_NAMES = {
     78: ("Tackles", "タックル"),
     79: ("Assists", "アシスト"),
     80: ("Passes", "パス"),
-    81: ("Successful passes", "成功パス"),
-    82: ("Pass %", "パス成功率"),
-    88: ("Appearances", "出場数"),
+    84: ("Yellow cards", "警告"),
+    86: ("Shots on target", "枠内シュート"),
+    88: ("Goals conceded", "失点"),
+    100: ("Interceptions", "インターセプト"),
+    101: ("Clearances", "クリア"),
+    103: ("Punches", "パンチング"),
+    104: ("Saves inside box", "PA内セーブ"),
+    107: ("Aerials won", "空中戦勝利"),
+    108: ("Dribble attempts", "ドリブル試行"),
+    109: ("Successful dribbles", "ドリブル成功"),
+    116: ("Accurate passes", "成功パス"),
     117: ("Key passes", "キーパス"),
     118: ("Rating", "レーティング"),
     119: ("Minutes", "出場時間"),
-    194: ("Shots", "シュート"),
-    214: ("Tackles", "タックル"),
-    215: ("Intercepts", "インターセプト"),
-    216: ("Clearances", "クリア"),
-    321: ("Aerials won", "空中戦勝利"),
-    322: ("Dribbles success", "ドリブル成功"),
-    1584: ("Accurate pass %", "パス精度%"),
-    5304: ("xG", "xG"),
+    122: ("Long balls", "ロングボール"),
+    1584: ("Pass accuracy %", "パス成功率"),
+    194: ("Clean sheets", "無失点"),
+    214: ("Team wins", "勝利"),
+    215: ("Team draws", "引き分け"),
+    216: ("Team losses", "敗戦"),
+    321: ("Appearances", "出場数"),
+    322: ("Lineups", "先発数"),
+    27271: ("Ball recovery", "ボール回収"),
 }
 
-# 暫定レーダー（後で全指標確認後に組み直す）
-RADAR_ORDER = [52, 79, 194, 214, 215, 216, 321, 322]
+# 暫定レーダー（シーズン集計・後で置換予定）
+RADAR_ORDER = [52, 79, 42, 78, 100, 101, 107, 109]
 
 POSITION_MAP = {
-    1: "GK", 2: "DEF", 3: "MID", 4: "FWD", 5: "DEF", 6: "MID", 7: "MID",
-    8: "FWD", 9: "FWD", 10: "MID", 11: "DEF", 12: "MID", 13: "GK", 14: "DEF",
-    15: "MID", 16: "FWD", 17: "DEF", 18: "MID", 19: "FWD", 20: "MID",
-    21: "DEF", 22: "MID", 23: "FWD", 24: "DEF", 25: "MID", 26: "FWD", 27: "GK",
+    24: "GK",
+    25: "DEF",
+    26: "MID",
+    27: "FWD",
 }
 
 
@@ -141,7 +149,6 @@ def get_total_value(detail):
             return value["average"]
         if "percentage" in value and value["percentage"] is not None:
             return value["percentage"]
-        # dictの最初の数値
         for v in value.values():
             if isinstance(v, (int, float)):
                 return v
@@ -176,24 +183,23 @@ def calc_age(date_of_birth):
 
 
 def get_position_label(player):
-    if player.get("position_id") in POSITION_MAP:
-        return POSITION_MAP[player.get("position_id")]
+    pid = player.get("position_id")
+    if pid in POSITION_MAP:
+        return POSITION_MAP[pid]
     pos = player.get("position") or player.get("detailed_position") or {}
     if isinstance(pos, dict):
-        name = pos.get("name") or pos.get("developer_name")
-        if name:
-            upper = str(name).upper()
-            if "GOAL" in upper or upper == "GK":
-                return "GK"
-            if "DEF" in upper or "BACK" in upper:
-                return "DEF"
-            if "MID" in upper:
-                return "MID"
-            if "ATT" in upper or "FWD" in upper or "FORW" in upper or "WING" in upper:
-                return "FWD"
-            return str(name)
         if pos.get("id") in POSITION_MAP:
             return POSITION_MAP[pos.get("id")]
+        name = pos.get("name") or pos.get("developer_name") or ""
+        upper = str(name).upper()
+        if "GOAL" in upper or upper == "GK":
+            return "GK"
+        if "DEF" in upper or "BACK" in upper:
+            return "DEF"
+        if "MID" in upper:
+            return "MID"
+        if "ATT" in upper or "FWD" in upper or "FORW" in upper or "WING" in upper:
+            return "FWD"
     return "MID"
 
 
@@ -423,325 +429,307 @@ try:
 
     if not players:
         st.info(TEXT["no_players"])
-        st.stop()
-
-    player_options = {p["name"]: p["id"] for p in players if p.get("id")}
-    selected_player_name = st.selectbox(TEXT["player_select"], sorted(player_options))
-    selected_player = next(
-        p for p in players if p.get("id") == player_options[selected_player_name]
-    )
-
-    details = [
-        d
-        for s in get_season_statistics(selected_player)
-        for d in s.get("details", [])
-    ]
-
-    # type_id -> value
-    all_stats_rows = []
-    raw_by_id = {}
-    for d in details:
-        tid = d.get("type_id")
-        val = get_total_value(d)
-        if tid is None:
-            continue
-        raw_by_id[tid] = val
-        all_stats_rows.append(
-            {
-                "type_id": tid,
-                "name": known_name(tid),
-                "value": val,
-                "raw": d.get("value"),
-            }
+    else:
+        player_options = {p["name"]: p["id"] for p in players if p.get("id")}
+        selected_player_name = st.selectbox(TEXT["player_select"], sorted(player_options))
+        selected_player = next(
+            p for p in players if p.get("id") == player_options[selected_player_name]
         )
 
-    # type_id順で表示
-    all_stats_rows = sorted(all_stats_rows, key=lambda x: x["type_id"] or 0)
-
-    minutes = get_minutes(selected_player)
-    age = calc_age(
-        selected_player.get("date_of_birth")
-        or selected_player.get("dateOfBirth")
-        or selected_player.get("birthday")
-    )
-    position = get_position_label(selected_player)
-    age_text = f"{age}" if age is not None else "-"
-    pos_text = position if position else "-"
-
-    st.markdown(
-        f"""
-        <div style="
-            background:{WHITE};
-            border:1px solid {CARD_BORDER};
-            border-left:5px solid {NAVY};
-            border-radius:10px;
-            padding:10px 12px 8px;
-            margin:2px 0 8px;
-        ">
-          <div style="font-size:22px;font-weight:800;color:{NAVY};line-height:1.2;">
-            {selected_player_name}
-          </div>
-          <div style="margin-top:4px;font-size:13px;color:{AXIS};font-weight:600;">
-            {selected_team_name}
-            <span style="margin:0 6px;color:#B0BEC8;">|</span>
-            {pos_text}
-            <span style="margin:0 6px;color:#B0BEC8;">|</span>
-            {age_text}{" yrs" if is_english else "歳"}
-            <span style="margin:0 6px;color:#B0BEC8;">|</span>
-            {minutes}{" min" if is_english else "分"}
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # ===== 全指標一覧（ここが今回の本命） =====
-    st.subheader(TEXT["all_stats"])
-    st.caption(
-        "ポジション別レーダー用に、使える type_id をここから選びます。"
-        if not is_english
-        else "Use these type_ids to design position-specific radars."
-    )
-    if all_stats_rows:
-        st.write(f"{'件数' if not is_english else 'Count'}: {len(all_stats_rows)}")
-        st.dataframe(
-            [
-                {
-                    "type_id": r["type_id"],
-                    "name": r["name"],
-                    "value": r["value"],
-                }
-                for r in all_stats_rows
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
-        with st.expander("raw value (debug)" if is_english else "raw値（詳細）"):
-            st.json({str(r["type_id"]): r["raw"] for r in all_stats_rows})
-    else:
-        st.warning(
-            "この選手・シーズンでは statistics.details が空でした。"
-            if not is_english
-            else "No statistics.details for this player/season."
-        )
-
-    # 暫定レーダー（確認用）
-    labels = [known_name(i) if not is_english else KNOWN_NAMES.get(i, (f"id{i}",))[0] for i in RADAR_ORDER]
-    # English labels for export image (avoid JP font issues)
-    labels_en = [KNOWN_NAMES.get(i, (f"id{i}", f"id{i}"))[0] for i in RADAR_ORDER]
-    raw_values = [
-        raw_by_id[i] if isinstance(raw_by_id.get(i), (int, float)) else 0
-        for i in RADAR_ORDER
-    ]
-    if minutes > 0:
-        display_values = [round(v * 90 / minutes, 2) for v in raw_values]
-        scale_label = "per90"
-    else:
-        display_values = list(raw_values)
-        scale_label = "raw"
-
-    if sum(display_values) == 0:
-        st.info(TEXT["no_stats"])
-    else:
-        radial_max = max(max(display_values) * 1.15, 1.0)
-        title_lines = [
-            selected_player_name,
-            f"{selected_team_name}   |   {pos_text}   |   {age_text} yrs   |   {minutes} min",
-            f"Superliga {season_name}   ·   {scale_label}",
+        details = [
+            d
+            for s in get_season_statistics(selected_player)
+            for d in s.get("details", [])
         ]
-        fig_export = build_radar_figure(
-            labels_en,
-            display_values,
-            title_lines=title_lines,
-            radial_max=radial_max,
+        all_stats_rows = []
+        raw_by_id = {}
+        for d in details:
+            tid = d.get("type_id")
+            val = get_total_value(d)
+            if tid is None:
+                continue
+            raw_by_id[tid] = val
+            all_stats_rows.append(
+                {"type_id": tid, "name": known_name(tid), "value": val}
+            )
+        all_stats_rows = sorted(all_stats_rows, key=lambda x: x["type_id"] or 0)
+
+        minutes = get_minutes(selected_player)
+        age = calc_age(
+            selected_player.get("date_of_birth")
+            or selected_player.get("dateOfBirth")
+            or selected_player.get("birthday")
         )
-        try:
-            png_data = fig_export.to_image(
-                format="png", width=900, height=1180, scale=2
+        position = get_position_label(selected_player)
+        age_text = f"{age}" if age is not None else "-"
+        pos_text = position if position else "-"
+
+        st.markdown(
+            f"""
+            <div style="
+                background:{WHITE};
+                border:1px solid {CARD_BORDER};
+                border-left:5px solid {NAVY};
+                border-radius:10px;
+                padding:10px 12px 8px;
+                margin:2px 0 8px;
+            ">
+              <div style="font-size:22px;font-weight:800;color:{NAVY};line-height:1.2;">
+                {selected_player_name}
+              </div>
+              <div style="margin-top:4px;font-size:13px;color:{AXIS};font-weight:600;">
+                {selected_team_name}
+                <span style="margin:0 6px;color:#B0BEC8;">|</span>
+                {pos_text}
+                <span style="margin:0 6px;color:#B0BEC8;">|</span>
+                {age_text}{" yrs" if is_english else "歳"}
+                <span style="margin:0 6px;color:#B0BEC8;">|</span>
+                {minutes}{" min" if is_english else "分"}
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        with st.expander(TEXT["all_stats"]):
+            if all_stats_rows:
+                st.dataframe(all_stats_rows, use_container_width=True, hide_index=True)
+            else:
+                st.warning("statistics.details が空です")
+
+        labels_en = [
+            KNOWN_NAMES.get(i, (f"id{i}", f"id{i}"))[0] for i in RADAR_ORDER
+        ]
+        raw_values = [
+            raw_by_id[i] if isinstance(raw_by_id.get(i), (int, float)) else 0
+            for i in RADAR_ORDER
+        ]
+        if minutes > 0:
+            display_values = [round(v * 90 / minutes, 2) for v in raw_values]
+            scale_label = "per90"
+        else:
+            display_values = list(raw_values)
+            scale_label = "raw"
+
+        if sum(display_values) == 0:
+            st.info(TEXT["no_stats"])
+        else:
+            radial_max = max(max(display_values) * 1.15, 1.0)
+            title_lines = [
+                selected_player_name,
+                f"{selected_team_name}   |   {pos_text}   |   {age_text} yrs   |   {minutes} min",
+                f"Superliga {season_name}   ·   {scale_label} (season API)",
+            ]
+            fig_export = build_radar_figure(
+                labels_en,
+                display_values,
+                title_lines=title_lines,
+                radial_max=radial_max,
             )
-            st.markdown(f"**{TEXT['save_hint']}**")
-            st.image(png_data, use_container_width=True)
-            st.caption(TEXT["per90_note"])
-            st.download_button(
-                label=TEXT["download"],
-                data=png_data,
-                file_name=f"{selected_player_name}_radar.png",
-                mime="image/png",
-            )
-        except Exception as image_error:
-            st.warning(
-                f"画像の生成エラー: {image_error}"
-                if not is_english
-                else f"Image export error: {image_error}"
-            )
+            try:
+                png_data = fig_export.to_image(
+                    format="png", width=900, height=1180, scale=2
+                )
+                st.markdown(f"**{TEXT['save_hint']}**")
+                st.image(png_data, use_container_width=True)
+                st.caption(TEXT["per90_note"] + " ※現状はシーズン集計API（暫定）")
+                st.download_button(
+                    label=TEXT["download"],
+                    data=png_data,
+                    file_name=f"{selected_player_name}_radar.png",
+                    mime="image/png",
+                )
+            except Exception as image_error:
+                st.warning(f"画像の生成エラー: {image_error}")
 
 except Exception as e:
     st.error(f"接続エラー: {e}" if not is_english else f"Connection error: {e}")
+
+
 # ============================================================
-# 一時デバッグ：Superliga 1試合の lineups.details 確認用
-# 確認後にこのブロック全体を削除してください
-# トークンは表示しません
+# Aggregate Prototype（少数Fixtureのみ）
 # ============================================================
 st.divider()
-st.subheader("Fixture type_id 確認（一時）")
+st.subheader("Aggregate Prototype（一時）")
 st.caption(
-    "終了済み Superliga 1試合だけを対象に、lineups.details の type_id / code / name / value を確認します。"
+    "終了済み Superliga を最大5試合だけ取得し、Player × Season 形式に合算できるか検証します。"
 )
 
-_debug_token = os.getenv("SPORTMONKS_TOKEN")
-if not _debug_token:
+_proto_token = os.getenv("SPORTMONKS_TOKEN")
+if not _proto_token:
     st.warning("SPORTMONKS_TOKEN が Secrets にありません。")
 else:
-    _debug_base = "https://api.sportmonks.com/v3/football"
-    _debug_headers = {"Authorization": _debug_token}
-    _debug_params = {"api_token": _debug_token}
+    _base = "https://api.sportmonks.com/v3/football"
+    _headers = {"Authorization": _proto_token}
+    _params = {"api_token": _proto_token}
+    _POS = {24: "GK", 25: "DEF", 26: "MID", 27: "FWD"}
 
-    # 確認したい type_id（照合用）
-    _TARGET_IDS = {
-        52, 42, 86, 80, 81, 82, 117, 78, 100, 101,
-        107, 108, 109, 56, 57, 118, 119,
-    }
+    def _num(v):
+        if v is None:
+            return 0.0
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, dict):
+            for k in ("total", "average", "percentage", "value"):
+                if k in v and isinstance(v[k], (int, float)):
+                    return float(v[k])
+            for x in v.values():
+                if isinstance(x, (int, float)):
+                    return float(x)
+        return 0.0
 
-    col_a, col_b = st.columns(2)
-    with col_a:
-        use_auto = st.checkbox("日付範囲から1試合を自動取得", value=True)
-    with col_b:
-        manual_fixture_id = st.text_input(
-            "または fixture_id を直接入力",
-            value="",
-            placeholder="例: 12345678",
-        )
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        start_d = st.text_input("開始日", value="2026-08-01", key="proto_start")
+    with c2:
+        end_d = st.text_input("終了日", value="2026-08-15", key="proto_end")
+    with c3:
+        max_fx = st.number_input("最大試合数", min_value=1, max_value=5, value=4, key="proto_max")
 
-    start_date = st.text_input("開始日 (YYYY-MM-DD)", value="2026-08-14")
-    end_date = st.text_input("終了日 (YYYY-MM-DD)", value="2026-08-15")
-
-    if st.button("1試合だけ確認する"):
+    if st.button("3〜5試合を集計する", key="proto_run"):
         try:
-            fixture_id = None
-            fixture_name = ""
+            between_res = requests.get(
+                f"{_base}/fixtures/between/{start_d}/{end_d}",
+                headers=_headers,
+                params={
+                    **_params,
+                    "filters": "fixtureLeagues:271",
+                    "include": "participants",
+                },
+                timeout=30,
+            )
+            between_json = between_res.json()
+            if between_res.status_code != 200:
+                st.error(f"fixtures/between 失敗: {between_res.status_code}")
+            else:
+                all_fx = between_json.get("data") or []
+                selected = all_fx[: int(max_fx)]
+                st.write(f"使用Fixture数: {len(selected)} / 期間内ヒット: {len(all_fx)}")
 
-            # --- fixture_id の決定（1件だけ）---
-            if manual_fixture_id.strip().isdigit():
-                fixture_id = int(manual_fixture_id.strip())
-            elif use_auto:
-                between_url = (
-                    f"{_debug_base}/fixtures/between/{start_date}/{end_date}"
-                )
-                between_res = requests.get(
-                    between_url,
-                    headers=_debug_headers,
-                    params={
-                        **_debug_params,
-                        "filters": "fixtureLeagues:271",
-                    },
-                    timeout=30,
-                )
-                between_data = between_res.json()
-                if between_res.status_code != 200:
-                    st.error(f"fixtures/between エラー: {between_res.status_code}")
-                    st.write(between_data)
+                if not selected:
+                    st.warning("試合がありません。日付を変えてください。")
                 else:
-                    fixtures = between_data.get("data") or []
-                    if not fixtures:
-                        st.warning("指定日の Superliga 試合が見つかりません。日付を変えてください。")
-                    else:
-                        fx = fixtures[0]
-                        fixture_id = fx.get("id")
-                        # 名前が取れれば表示
-                        participants = fx.get("name") or fx.get("starting_at") or ""
-                        fixture_name = str(participants)
+                    fixture_rows = []
+                    aggs = {}
 
-            if fixture_id:
-                st.info(f"使用 fixture_id: {fixture_id}" + (f" / {fixture_name}" if fixture_name else ""))
-
-                fix_res = requests.get(
-                    f"{_debug_base}/fixtures/{fixture_id}",
-                    headers=_debug_headers,
-                    params={
-                        **_debug_params,
-                        "include": "lineups.details.type;participants",
-                    },
-                    timeout=30,
-                )
-                fix_data = fix_res.json()
-                if fix_res.status_code != 200:
-                    st.error(f"fixtures/{{id}} エラー: {fix_res.status_code}")
-                    st.write(fix_data)
-                else:
-                    data = fix_data.get("data") or {}
-                    lineups = data.get("lineups") or []
-
-                    st.write(f"lineups 人数: {len(lineups)}")
-
-                    rows = []
-                    seen_ids = set()
-                    for lu in lineups:
-                        player = lu.get("player") or {}
-                        player_name = (
-                            player.get("name")
-                            or lu.get("player_name")
-                            or f"player_id={lu.get('player_id')}"
+                    for fx in selected:
+                        fid = fx.get("id")
+                        fname = fx.get("name") or f"fixture {fid}"
+                        fdate = (fx.get("starting_at") or "")[:10]
+                        fixture_rows.append(
+                            {"fixture_id": fid, "match": fname, "date": fdate}
                         )
-                        details = lu.get("details") or []
-                        for d in details:
-                            tid = d.get("type_id")
-                            t = d.get("type") or {}
-                            val = d.get("value")
-                            if isinstance(val, dict):
-                                # total があればそれを優先
-                                display_val = val.get("total", val)
-                            else:
-                                display_val = val
-                            rows.append(
-                                {
-                                    "player": player_name,
-                                    "type_id": tid,
-                                    "code": t.get("code"),
-                                    "name": t.get("name"),
-                                    "developer_name": t.get("developer_name"),
-                                    "value": display_val,
+
+                        fr = requests.get(
+                            f"{_base}/fixtures/{fid}",
+                            headers=_headers,
+                            params={**_params, "include": "lineups.details.type"},
+                            timeout=40,
+                        )
+                        if fr.status_code != 200:
+                            st.warning(f"fixture {fid} 取得失敗: {fr.status_code}")
+                            continue
+
+                        fdata = (fr.json() or {}).get("data") or {}
+                        lineups = fdata.get("lineups") or []
+                        st.caption(f"fixture {fid}: lineups={len(lineups)} / {fname}")
+
+                        for lu in lineups:
+                            pid = lu.get("player_id")
+                            if not pid:
+                                continue
+                            pname = (
+                                (lu.get("player") or {}).get("name")
+                                or lu.get("player_name")
+                                or f"id:{pid}"
+                            )
+                            team_id = lu.get("team_id")
+                            pos_id = lu.get("position_id") or (
+                                (lu.get("player") or {}).get("position_id")
+                            )
+
+                            if pid not in aggs:
+                                aggs[pid] = {
+                                    "player_id": pid,
+                                    "player_name": pname,
+                                    "team_id": team_id,
+                                    "position_id": pos_id,
+                                    "minutes": 0.0,
+                                    "raw": {},
+                                    "fixture_count": 0,
                                 }
-                            )
-                            if tid is not None:
-                                seen_ids.add(tid)
+                            else:
+                                if pname and aggs[pid]["player_name"].startswith("id:"):
+                                    aggs[pid]["player_name"] = pname
+                                if pos_id and not aggs[pid]["position_id"]:
+                                    aggs[pid]["position_id"] = pos_id
 
-                    if not rows:
-                        st.warning(
-                            "lineups.details が空です。"
-                            "この試合・プランでは Player Fixture Statistics が無い可能性があります。"
+                            aggs[pid]["fixture_count"] += 1
+                            for d in lu.get("details") or []:
+                                tid = d.get("type_id")
+                                if tid is None:
+                                    continue
+                                val = _num(d.get("value"))
+                                if tid == 119:
+                                    aggs[pid]["minutes"] += val
+                                aggs[pid]["raw"][tid] = (
+                                    aggs[pid]["raw"].get(tid, 0.0) + val
+                                )
+
+                    st.markdown("#### ① 使用したFixture一覧")
+                    st.dataframe(fixture_rows, use_container_width=True, hide_index=True)
+                    st.markdown(f"#### ② 集計した選手数: **{len(aggs)}**")
+
+                    sample = []
+                    for a in aggs.values():
+                        mins = a["minutes"]
+                        raw = a["raw"]
+                        pos = _POS.get(a["position_id"], a["position_id"])
+
+                        def per90(tid):
+                            if mins <= 0:
+                                return None
+                            return round(raw.get(tid, 0.0) * 90.0 / mins, 2)
+
+                        passes = raw.get(80, 0.0)
+                        acc = raw.get(116, 0.0)
+                        pass_pct = (
+                            round(acc / passes * 100.0, 1) if passes > 0 else None
                         )
-                    else:
-                        st.success(f"details 行数: {len(rows)} / ユニーク type_id: {len(seen_ids)}")
 
-                        # 確認対象との照合
-                        present = sorted(_TARGET_IDS & seen_ids)
-                        missing = sorted(_TARGET_IDS - seen_ids)
-                        st.markdown("**確認対象のうち、レスポンスに存在した type_id**")
-                        st.write(present if present else "なし")
-                        st.markdown("**確認対象のうち、存在しなかった type_id**")
-                        st.write(missing if missing else "なし")
+                        sample.append(
+                            {
+                                "Player": a["player_name"],
+                                "Pos": pos,
+                                "position_id": a["position_id"],
+                                "Minutes": int(mins) if mins else 0,
+                                "Fixtures": a["fixture_count"],
+                                "Goals/90": per90(52),
+                                "Shots/90": per90(42),
+                                "Passes/90": per90(80),
+                                "Pass Acc %": pass_pct,
+                                "Key Passes/90": per90(117),
+                                "Tackles/90": per90(78),
+                                "Intercepts/90": per90(100),
+                                "Clearances/90": per90(101),
+                                "Aerials/90": per90(107),
+                                "Succ. Dribbles/90": per90(109),
+                                "Ball Recovery/90": per90(27271),
+                            }
+                        )
 
-                        st.markdown("**出現した全 type_id（重複なし）**")
-                        st.write(sorted(seen_ids))
+                    sample.sort(key=lambda x: x["Minutes"], reverse=True)
 
-                        st.markdown("**詳細一覧（type_id / code / name / value）**")
-                        st.dataframe(rows, use_container_width=True, hide_index=True)
+                    st.markdown("#### ③ Player Season Aggregate サンプル")
+                    st.caption(
+                        "Pass Acc % = Σ Accurate Passes(116) ÷ Σ Passes(80) × 100"
+                    )
+                    st.dataframe(sample[:30], use_container_width=True, hide_index=True)
 
-                        # AGF っぽい名前があれば抜粋
-                        agf_rows = [
-                            r for r in rows
-                            if "agf" in str(r.get("player", "")).lower()
-                            or any(
-                                n in str(r.get("player", "")).lower()
-                                for n in ("kahl", "bech", "hansen", "mortensen", "links")
-                            )
-                        ]
-                        if agf_rows:
-                            st.markdown("**AGF関連っぽい選手の抜粋**")
-                            st.dataframe(agf_rows, use_container_width=True, hide_index=True)
+                    multi = [s for s in sample if s["Fixtures"] >= 2]
+                    st.markdown(f"複数試合にまたがる選手: **{len(multi)}** 人")
+                    if multi:
+                        st.dataframe(multi[:10], use_container_width=True, hide_index=True)
 
-        except Exception as _debug_e:
-            st.error(f"デバッグ取得エラー: {_debug_e}")
-# ============================================================
-# 一時デバッグここまで
-# ============================================================
+        except Exception as e:
+            st.error(f"Prototype エラー: {e}")
