@@ -26,6 +26,25 @@ LEAGUE_ID = 271
 CACHE_ROOT = Path(__file__).with_name("cache") / "superliga"
 POSITION_MAP = {24: "GK", 25: "DEF", 26: "MID", 27: "FWD"}
 
+# Percentile bands
+BAND_ELITE = "#0B1F3A"      # 90-100
+BAND_STRONG = "#2F6FED"     # 70-89
+BAND_AVG = "#8FA3BF"        # 30-69
+BAND_BELOW = "#C5CEDA"      # 0-29
+
+
+def percentile_band(p):
+    if p is None:
+        return "—", BAND_AVG
+    if p >= 90:
+        return "Elite", BAND_ELITE
+    if p >= 70:
+        return "Strong", BAND_STRONG
+    if p >= 30:
+        return "Average", BAND_AVG
+    return "Below", BAND_BELOW
+
+
 POSITION_METRICS = {
     "GK": [
         {"key": "saves_p90", "label": "Saves/90", "tid": 57, "kind": "per90"},
@@ -68,7 +87,6 @@ POSITION_METRICS = {
     ],
 }
 
-# ---------- i18n ----------
 _, lang_col = st.columns([4, 1])
 with lang_col:
     language = st.selectbox(
@@ -88,7 +106,6 @@ T = {
     "team": "Team" if is_en else "チーム",
     "all_teams": "All teams" if is_en else "すべてのチーム",
     "player": "Player" if is_en else "選手",
-    "overview": "Player overview" if is_en else "選手概要",
     "radar": "Percentile radar" if is_en else "Percentileレーダー",
     "stats": "Statistics" if is_en else "スタッツ詳細",
     "download": "Download PNG" if is_en else "PNGをダウンロード",
@@ -97,21 +114,23 @@ T = {
     if is_en
     else "全Fixtureを強制再取得（通常は不要）",
     "updating": "Updating..." if is_en else "更新中...",
-    "no_data": "No data yet. Open Data update below."
+    "no_data": "No data yet. Open Data maintenance below."
     if is_en
-    else "データがありません。下の「データ更新」から取得してください。",
+    else "データがありません。下の「データメンテナンス」から取得してください。",
     "no_players": "No players match the filters. Try lowering minimum minutes."
     if is_en
     else "条件に合う選手がいません。最低出場時間を下げてください。",
     "pct_title": "What is Percentile?" if is_en else "Percentileとは？",
     "pct_body": (
         "Shows how the player ranks against others in the **same position** "
-        "who meet the selected minimum-minute threshold (0–100). "
+        "who meet the selected minimum-minute threshold (0–100).\n\n"
+        "**Bands:** Elite 90–100 · Strong 70–89 · Average 30–69 · Below 0–29\n\n"
         "Higher is better, except **Goals Conceded/90** and **Fouls/90** "
-        "(lower is better → higher percentile)."
+        "(lower raw → higher percentile)."
         if is_en
         else "選択した最低出場時間を満たす**同ポジション**の選手を母集団として、"
-        "その中での位置を 0–100 で示します。"
+        "位置を 0–100 で示します。\n\n"
+        "**帯:** Elite 90–100 · Strong 70–89 · Average 30–69 · Below 0–29\n\n"
         "基本は高いほど良いですが、**失点/90・ファウル/90**は少ないほど高Percentileです。"
     ),
     "early_note": (
@@ -119,13 +138,16 @@ T = {
         if is_en
         else "シーズン序盤は母集団が小さいため、Percentileは参考値として見てください。"
     ),
+    "band_legend": (
+        "Elite 90+ · Strong 70–89 · Average 30–69 · Below <30"
+        if is_en
+        else "Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満"
+    ),
     "method_title": "Data & methodology" if is_en else "データと計算方法",
     "status_title": "Data update status" if is_en else "データ更新ステータス",
     "admin_title": "Data maintenance" if is_en else "データメンテナンス",
     "last_updated": "Last updated" if is_en else "最終更新",
     "connected": "Connected" if is_en else "接続済み",
-    "minutes": "Minutes" if is_en else "出場時間",
-    "position": "Position" if is_en else "ポジション",
     "apps": "Apps" if is_en else "出場数",
     "rebuild_ok": "Aggregate rebuilt" if is_en else "Aggregate再構築",
     "skip_ok": "No new fixtures · using existing aggregate"
@@ -249,24 +271,35 @@ def format_updated_at(iso_str):
         return str(iso_str)[:19]
 
 
-def build_radar_figure(labels, values, title_lines, radial_max=100):
+def build_radar_figure(labels, values, title_lines, marker_colors):
+    """values = percentiles 0-100; marker_colors aligned with values (no close point)."""
+    r = values + [values[0]]
+    theta = labels + [labels[0]]
+    text_vals = [f"{int(round(v))}" if v is not None else "" for v in values]
+    text_vals_closed = text_vals + [text_vals[0]]
+    colors_closed = marker_colors + [marker_colors[0]]
+
     fig = go.Figure(
         go.Scatterpolar(
-            r=values + [values[0]],
-            theta=labels + [labels[0]],
+            r=r,
+            theta=theta,
             fill="toself",
             fillcolor=NAVY_SOFT,
-            line={"color": NAVY, "width": 3.5},
+            line={"color": NAVY, "width": 3.2},
             marker={
-                "color": WHITE,
-                "size": 10,
-                "line": {"color": NAVY, "width": 2.5},
+                "color": colors_closed,
+                "size": 14,
+                "line": {"color": WHITE, "width": 2},
             },
-            mode="lines+markers",
+            mode="lines+markers+text",
+            text=text_vals_closed,
+            textposition="top center",
+            textfont={"size": 13, "color": NAVY, "family": "Arial"},
+            hovertemplate="%{theta}: %{r:.0f}<extra></extra>",
         )
     )
     annotations = []
-    sizes = [28, 15, 13]
+    sizes = [32, 17, 14]
     for i, line in enumerate(title_lines):
         annotations.append(
             {
@@ -274,13 +307,13 @@ def build_radar_figure(labels, values, title_lines, radial_max=100):
                 "xref": "paper",
                 "yref": "paper",
                 "x": 0.5,
-                "y": 0.995 - i * 0.046,
+                "y": 0.995 - i * 0.048,
                 "xanchor": "center",
                 "yanchor": "top",
                 "showarrow": False,
                 "font": {
                     "color": NAVY,
-                    "size": sizes[i] if i < len(sizes) else 12,
+                    "size": sizes[i] if i < len(sizes) else 13,
                     "family": "Arial",
                 },
             }
@@ -295,7 +328,7 @@ def build_radar_figure(labels, values, title_lines, radial_max=100):
             "xanchor": "center",
             "yanchor": "bottom",
             "showarrow": False,
-            "font": {"color": NAVY, "size": 12, "family": "Arial"},
+            "font": {"color": NAVY, "size": 13, "family": "Arial"},
         }
     )
     images = []
@@ -308,8 +341,8 @@ def build_radar_figure(labels, values, title_lines, radial_max=100):
                 "yref": "paper",
                 "x": 0.93,
                 "y": 0.055,
-                "sizex": 0.085,
-                "sizey": 0.085,
+                "sizex": 0.09,
+                "sizey": 0.09,
                 "xanchor": "center",
                 "yanchor": "bottom",
                 "sizing": "contain",
@@ -317,27 +350,27 @@ def build_radar_figure(labels, values, title_lines, radial_max=100):
             }
         )
     fig.update_layout(
-        height=860,
-        margin={"l": 40, "r": 40, "t": 150, "b": 80},
+        height=900,
+        margin={"l": 48, "r": 48, "t": 160, "b": 88},
         paper_bgcolor=WHITE,
         plot_bgcolor=WHITE,
         showlegend=False,
         images=images,
         annotations=annotations,
         polar={
-            "domain": {"x": [0.02, 0.98], "y": [0.06, 0.72]},
+            "domain": {"x": [0.02, 0.98], "y": [0.05, 0.70]},
             "bgcolor": BG,
             "radialaxis": {
                 "visible": True,
-                "range": [0, radial_max],
+                "range": [0, 100],
                 "gridcolor": GRID,
                 "linecolor": AXIS,
-                "tickfont": {"color": AXIS, "size": 11},
+                "tickfont": {"color": AXIS, "size": 12},
             },
             "angularaxis": {
                 "gridcolor": GRID,
                 "linecolor": AXIS,
-                "tickfont": {"color": NAVY, "size": 13},
+                "tickfont": {"color": NAVY, "size": 15},
                 "rotation": 90,
                 "direction": "clockwise",
             },
@@ -375,7 +408,18 @@ def compute_metrics(raw, minutes, metric_defs):
     return out
 
 
-# ----- season (unchanged data path) -----
+def style_percentile_col(val):
+    try:
+        p = float(val)
+    except (TypeError, ValueError):
+        return ""
+    _, color = percentile_band(p)
+    # readable text on dark elite band
+    text = "#FFFFFF" if p >= 90 else NAVY
+    return f"background-color: {color}; color: {text}; font-weight: 600;"
+
+
+# ----- season -----
 league_res = requests.get(
     f"{base_url}/leagues/{LEAGUE_ID}",
     headers=headers,
@@ -701,7 +745,7 @@ def incremental_update(sid, season_meta_row, force_all=False):
     return aggs, status, errors
 
 
-# auto load aggregate
+# auto load
 if "fx_aggs" not in st.session_state or st.session_state.fx_aggs is None:
     aggs, meta = restore_aggs_from_file(season_id)
     if aggs is not None:
@@ -725,7 +769,6 @@ aggs = st.session_state.get("fx_aggs")
 status = st.session_state.get("fx_status") or {}
 errors = st.session_state.get("fx_errors") or []
 
-# Last updated line
 updated_disp = format_updated_at(status.get("updated_at"))
 st.caption(
     f"{T['connected']} · {T['last_updated']}: **{updated_disp}** · "
@@ -735,14 +778,10 @@ st.caption(
 if not aggs:
     st.info(T["no_data"])
 else:
-    # ----- Filters -----
     st.markdown(f"##### {T['filters']}")
     f1, f2 = st.columns(2)
     with f1:
         min_min = st.selectbox(T["min_minutes"], [0, 300, 600, 900], index=1)
-    with f2:
-        # build team list after filter prep below
-        pass
 
     by_pos = {p: [] for p in ("GK", "DEF", "MID", "FWD")}
     for a in aggs.values():
@@ -786,11 +825,14 @@ else:
     if team_filter != T["all_teams"]:
         all_players = [g for g in all_players if g["Team"] == team_filter]
 
-    st.caption(
-        f"n={sum(len(v) for v in by_pos.values())} · "
-        f"GK{len(by_pos['GK'])} / DEF{len(by_pos['DEF'])} / "
-        f"MID{len(by_pos['MID'])} / FWD{len(by_pos['FWD'])} · {T['early_note']}"
+    n_total = sum(len(v) for v in by_pos.values())
+    cap = (
+        f"n={n_total} · GK{len(by_pos['GK'])} / DEF{len(by_pos['DEF'])} / "
+        f"MID{len(by_pos['MID'])} / FWD{len(by_pos['FWD'])}"
     )
+    if float(min_min) >= 300:
+        cap += f" · {T['early_note']}"
+    st.caption(cap)
 
     if not all_players:
         st.warning(T["no_players"])
@@ -806,7 +848,6 @@ else:
         pos = selected["Pos"]
         mdefs = POSITION_METRICS[pos]
 
-        # ----- Player header -----
         st.markdown(
             f"""
             <div style="border:1px solid #D7E0EC;border-radius:12px;padding:14px 16px;margin:8px 0 14px;background:#F8FAFC;">
@@ -822,10 +863,10 @@ else:
 
         with st.expander(T["pct_title"], expanded=False):
             st.markdown(T["pct_body"])
+            st.caption(T["band_legend"])
 
-        # ----- Radar (hero) -----
         st.markdown(f"##### {T['radar']}")
-        radar_labels, radar_values = [], []
+        radar_labels, radar_values, marker_colors = [], [], []
         check_rows = []
         for m in mdefs:
             if m["kind"] in ("per90", "lower_better_per90"):
@@ -836,26 +877,19 @@ else:
                     f"{selected['raw'].get(m['den'], 0)}"
                 )
             pct = selected.get("pct", {}).get(m["key"])
-            direction = (
-                "↓ better"
-                if is_en and m["kind"] == "lower_better_per90"
-                else (
-                    "少ないほど良"
-                    if (not is_en and m["kind"] == "lower_better_per90")
-                    else ("↑ better" if is_en else "多いほど良")
-                )
-            )
+            band_name, band_color = percentile_band(pct)
             check_rows.append(
                 {
                     "Metric": m["label"],
                     "Raw": raw_v,
                     "Per90 / %": selected["metrics"].get(m["key"]),
                     "Percentile": pct,
-                    "Direction": direction,
+                    "Band": band_name,
                 }
             )
             radar_labels.append(m["label"])
             radar_values.append(pct if pct is not None else 0)
+            marker_colors.append(band_color)
 
         fig = build_radar_figure(
             radar_labels,
@@ -865,11 +899,12 @@ else:
                 f"{selected['Team']} | {pos} | {selected['Minutes']} min",
                 f"Superliga {season_name} · Percentile radar",
             ],
-            100,
+            marker_colors,
         )
         try:
-            png = fig.to_image(format="png", width=900, height=1200, scale=2)
+            png = fig.to_image(format="png", width=900, height=1240, scale=2)
             st.image(png, use_container_width=True)
+            st.caption(T["band_legend"])
             st.download_button(
                 T["download"],
                 data=png,
@@ -879,11 +914,16 @@ else:
         except Exception as e:
             st.warning(str(e))
 
-        # ----- Stats table -----
         st.markdown(f"##### {T['stats']}")
-        st.dataframe(check_rows, use_container_width=True, hide_index=True)
+        import pandas as pd
 
-# ----- Methodology (public) -----
+        df = pd.DataFrame(check_rows)
+        st.dataframe(
+            df.style.map(style_percentile_col, subset=["Percentile"]),
+            use_container_width=True,
+            hide_index=True,
+        )
+
 with st.expander(T["method_title"], expanded=False):
     if is_en:
         st.markdown(
@@ -896,9 +936,10 @@ with st.expander(T["method_title"], expanded=False):
 **Methodology**
 - Minutes Played (type 119) as the Per90 denominator
 - Per90 = total ÷ minutes × 90
-- Pass accuracy = successful passes ÷ total passes (not an average of match %)
-- Comparisons are **within the same position**
-- Percentile uses only players above the selected minimum minutes
+- Pass accuracy = successful passes ÷ total passes
+- Comparisons within the same position
+- Percentile uses players above the selected minimum minutes
+- Bands: Elite 90–100 · Strong 70–89 · Average 30–69 · Below 0–29
 - Goals conceded & fouls: lower is better (percentile inverted)
             """
         )
@@ -913,14 +954,14 @@ with st.expander(T["method_title"], expanded=False):
 **計算方法**
 - 出場時間は Minutes Played（type 119）を分母に使用
 - Per90 = 合計 ÷ 出場分 × 90
-- パス成功率 = 成功パス合計 ÷ パス合計（試合％の平均ではない）
-- 比較は**同じポジション内**
-- Percentileは、選択した最低出場時間以上の選手のみが母集団
+- パス成功率 = 成功パス合計 ÷ パス合計
+- 比較は同じポジション内
+- Percentileは最低出場時間以上の選手のみが母集団
+- 帯: Elite 90–100 · Strong 70–89 · Average 30–69 · Below 0–29
 - 失点・ファウルは少ないほど高Percentile（反転）
             """
         )
 
-# ----- Admin / update (de-emphasized) -----
 with st.expander(T["admin_title"], expanded=False):
     force_all = st.checkbox(T["force"], value=False)
     if st.button(T["update"], type="secondary"):
