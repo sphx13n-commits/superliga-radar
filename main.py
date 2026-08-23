@@ -181,7 +181,6 @@ def build_radar_figure(labels, values, title_lines, radial_max):
         )
     )
 
-    # 上部テキストを大きく・中央寄せ
     annotations = []
     sizes = [28, 16, 14]
     for i, line in enumerate(title_lines):
@@ -203,18 +202,18 @@ def build_radar_figure(labels, values, title_lines, radial_max):
             }
         )
 
-    # クレジットは画像最下部中央（レーダーの外）
+    # ロゴの直下にアカウント名（右下）
     annotations.append(
         {
             "text": "@Dalaprospect",
             "xref": "paper",
             "yref": "paper",
-            "x": 0.5,
-            "y": 0.012,
+            "x": 0.93,
+            "y": 0.01,
             "xanchor": "center",
             "yanchor": "bottom",
             "showarrow": False,
-            "font": {"color": NAVY, "size": 15, "family": "Arial"},
+            "font": {"color": NAVY, "size": 12, "family": "Arial"},
         }
     )
 
@@ -230,10 +229,10 @@ def build_radar_figure(labels, values, title_lines, radial_max):
                 "source": get_logo_data_uri(),
                 "xref": "paper",
                 "yref": "paper",
-                "x": 0.92,
-                "y": 0.0,
-                "sizex": 0.08,
-                "sizey": 0.08,
+                "x": 0.93,
+                "y": 0.055,
+                "sizex": 0.085,
+                "sizey": 0.085,
                 "xanchor": "center",
                 "yanchor": "bottom",
                 "sizing": "contain",
@@ -242,7 +241,6 @@ def build_radar_figure(labels, values, title_lines, radial_max):
         ],
         annotations=annotations,
         polar={
-            # レーダーを少し下げて、上部テキスト・下部クレジットのスペースを確保
             "domain": {"x": [0.02, 0.98], "y": [0.08, 0.74]},
             "bgcolor": BG,
             "radialaxis": {
@@ -256,7 +254,6 @@ def build_radar_figure(labels, values, title_lines, radial_max):
             "angularaxis": {
                 "gridcolor": GRID,
                 "linecolor": AXIS,
-                # 指標名を大きく
                 "tickfont": {"color": NAVY, "size": 16, "family": "Arial"},
                 "rotation": 90,
                 "direction": "clockwise",
