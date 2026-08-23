@@ -137,7 +137,7 @@ try:
         f"{base_url}/leagues/271",
         headers=headers,
         params={**params, "include": "currentSeason;seasons"},
-        timeout=15,
+        timeout=30,
     )
     league_data = league_res.json()
 
