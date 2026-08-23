@@ -296,7 +296,7 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
     """
     - 上部タイトルの行間を広げて被り防止
     - チャート領域を大きく確保（画像は縦長）
-    - 注釈は最下部
+    - 注釈は英語固定（Kaleidoの日本語文字化け回避）
     """
     r_poly = values + [values[0]]
     theta = labels + [labels[0]]
@@ -361,7 +361,7 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
             }
         )
 
-    base_y = 0.105
+    base_y = 0.108
     for i, line in enumerate(footnotes or []):
         annotations.append(
             {
@@ -369,11 +369,11 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
                 "xref": "paper",
                 "yref": "paper",
                 "x": 0.03,
-                "y": base_y - i * 0.024,
+                "y": base_y - i * 0.026,
                 "xanchor": "left",
                 "yanchor": "top",
                 "showarrow": False,
-                "font": {"color": "#4B5563", "size": 13, "family": "Arial"},
+                "font": {"color": "#374151", "size": 15, "family": "Arial"},
             }
         )
 
@@ -484,11 +484,10 @@ def style_percentile_col(val):
         color, text = "#0B1F3A", "#FFFFFF"
     elif p >= 70:
         color, text = "#2F6FED", "#FFFFFF"
+    elif p >= 30:
+        color, text = "#B7C4D6", NAVY
     else:
-        if p >= 30:
-            color, text = "#B7C4D6", NAVY
-        else:
-            color, text = "#E6EBF2", NAVY
+        color, text = "#E6EBF2", NAVY
     return f"background-color: {color}; color: {text}; font-weight: 700;"
 
 
@@ -964,20 +963,13 @@ else:
             radar_values.append(pct if pct is not None else 0)
             marker_colors.append(band_color)
 
-        if is_en:
-            footnotes = [
-                f"Axes = within-position percentiles (0–100) · Sample: {pos} with ≥{int(min_min)} min (n={n_pos})",
-                "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30  |  Conc./Fouls inverted",
-                "Per90 uses Minutes Played · Pass Acc = Σ accurate ÷ Σ passes · Fixture aggregate (Sportmonks)",
-                f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
-            ]
-        else:
-            footnotes = [
-                f"軸 = 同ポジション内Percentile（0–100） · 母集団: {pos}・{int(min_min)}分以上（n={n_pos}）",
-                "帯: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満 ｜ 失点・ファウルは反転",
-                "Per90分母はMinutes Played · パス成功率は合計÷合計 · 試合集計（Sportmonks）",
-                f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
-            ]
+        # PNG注釈は英語固定（Kaleidoの日本語文字化け回避）
+        footnotes = [
+            f"Axes = within-position percentiles (0–100) · Sample: {pos}, ≥{int(min_min)} min (n={n_pos})",
+            "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30  |  Conceded/Fouls inverted",
+            "Per90 uses Minutes Played · Pass Acc = Σ accurate ÷ Σ passes · Fixture aggregate",
+            f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
+        ]
 
         fig = build_radar_figure(
             radar_labels,
