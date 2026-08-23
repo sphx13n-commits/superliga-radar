@@ -66,7 +66,24 @@ def fmt_num(x, kind="raw"):
     return s if s else "0"
 
 
-# 読みやすい表記（略しすぎない）
+def fmt_radar_label(v, is_ratio=False):
+    """レーダー頂点用。比率は1小数、それ以外は最大2小数。"""
+    if v is None:
+        return "—"
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    if is_ratio:
+        s = f"{x:.1f}"
+    else:
+        if abs(x) >= 10:
+            s = f"{x:.1f}"
+        else:
+            s = f"{x:.2f}"
+    return s.rstrip("0").rstrip(".") or "0"
+
+
 POSITION_METRICS = {
     "GK": [
         {"key": "saves_p90", "label": "Saves/90", "tid": 57, "kind": "per90"},
@@ -148,12 +165,14 @@ T = {
         "who meet the selected minimum-minute threshold (0–100).\n\n"
         "**Bands:** Elite 90–100 · Strong 70–89 · Average 30–69 · Below 0–29\n\n"
         "Higher is better, except **Goals Conceded/90** and **Fouls/90** "
-        "(lower raw → higher percentile)."
+        "(lower raw → higher percentile).\n\n"
+        "Radar **shape** = percentile · vertex **labels** = Per90 (or %)."
         if is_en
         else "選択した最低出場時間を満たす**同ポジション**の選手を母集団として、"
         "位置を 0–100 で示します。\n\n"
         "**帯:** Elite 90–100 · Strong 70–89 · Average 30–69 · Below 0–29\n\n"
-        "基本は高いほど良いですが、**失点/90・ファウル/90**は少ないほど高Percentileです。"
+        "基本は高いほど良いですが、**失点/90・ファウル/90**は少ないほど高Percentileです。\n\n"
+        "レーダーの**形** = Percentile · 頂点の**数字** = Per90（または%）。"
     ),
     "early_note": (
         "Early season: small samples make percentiles more volatile."
@@ -293,16 +312,18 @@ def format_updated_at(iso_str):
         return str(iso_str)[:19]
 
 
-def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
-    """水平ラベル。見切れ防止のため余白・幅を確保。"""
+def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, display_texts):
+    """
+    values: Percentile (0-100) → 形
+    display_texts: Per90 / % の文字列 → 頂点ラベル
+    """
     r_poly = values + [values[0]]
     theta = labels + [labels[0]]
     colors_closed = marker_colors + [marker_colors[0]]
 
     r_text = [min(v + 16, 116) for v in values]
     r_text_closed = r_text + [r_text[0]]
-    text_vals = [f"{int(round(v))}" for v in values]
-    text_closed = text_vals + [text_vals[0]]
+    text_closed = list(display_texts) + [display_texts[0]]
 
     fig = go.Figure()
     fig.add_trace(
@@ -318,7 +339,7 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
                 "line": {"color": NAVY, "width": 1.6},
             },
             mode="lines+markers",
-            hovertemplate="%{theta}: %{r:.0f}<extra></extra>",
+            hovertemplate="%{theta}: %{r:.0f} pctile<extra></extra>",
         )
     )
     fig.add_trace(
@@ -328,7 +349,7 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
             mode="text",
             text=text_closed,
             textfont={
-                "size": 26,
+                "size": 24,
                 "color": NAVY,
                 "family": "Arial Black, Arial, sans-serif",
             },
@@ -417,7 +438,6 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
         images=images,
         annotations=annotations,
         polar={
-            # 左右にラベル用スペースを多めに確保
             "domain": {"x": [0.14, 0.86], "y": [0.18, 0.80]},
             "bgcolor": BG,
             "radialaxis": {
@@ -936,7 +956,7 @@ else:
             st.caption(T["band_legend"])
 
         st.markdown(f"##### {T['radar']}")
-        radar_labels, radar_values, marker_colors = [], [], []
+        radar_labels, radar_values, marker_colors, display_texts = [], [], [], []
         check_rows = []
         for m in mdefs:
             if m["kind"] in ("per90", "lower_better_per90"):
@@ -946,13 +966,14 @@ else:
                     f"{fmt_num(selected['raw'].get(m['num'], 0))} / "
                     f"{fmt_num(selected['raw'].get(m['den'], 0))}"
                 )
+            metric_v = selected["metrics"].get(m["key"])
             pct = selected.get("pct", {}).get(m["key"])
             band_name, band_color = percentile_band(pct)
             check_rows.append(
                 {
                     "Metric": m["label"],
                     "Raw": raw_v if isinstance(raw_v, str) else fmt_num(raw_v, "raw"),
-                    "Per90 / %": fmt_num(selected["metrics"].get(m["key"]), "per90"),
+                    "Per90 / %": fmt_num(metric_v, "per90"),
                     "Percentile": fmt_num(pct, "pct"),
                     "Band": band_name,
                 }
@@ -960,9 +981,12 @@ else:
             radar_labels.append(m["label"])
             radar_values.append(pct if pct is not None else 0)
             marker_colors.append(band_color)
+            display_texts.append(
+                fmt_radar_label(metric_v, is_ratio=(m["kind"] == "ratio"))
+            )
 
         footnotes = [
-            f"Axes = within-position percentiles (0–100) · Sample: {pos}, ≥{int(min_min)} min (n={n_pos})",
+            f"Shape = percentile (0–100) · Labels = Per90 (or %) · Sample: {pos}, ≥{int(min_min)} min (n={n_pos})",
             "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30  |  Conceded/Fouls inverted",
             "Per90 uses Minutes Played · Pass Acc = Σ accurate ÷ Σ passes · Fixture aggregate",
             f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
@@ -978,11 +1002,15 @@ else:
             ],
             marker_colors,
             footnotes,
+            display_texts,
         )
         try:
             png = fig.to_image(format="png", width=1200, height=1500, scale=2)
             st.image(png, use_container_width=True)
-            st.caption(T["band_legend"])
+            st.caption(
+                T["band_legend"]
+                + (" · Shape = percentile · Labels = Per90/%" if is_en else " · 形=Percentile · 数字=Per90/%")
+            )
             st.download_button(
                 T["download"],
                 data=png,
@@ -1015,6 +1043,7 @@ with st.expander(T["method_title"], expanded=False):
 - Pass accuracy = successful passes ÷ total passes
 - Comparisons within the same position
 - Percentile uses players above the selected minimum minutes
+- Radar **shape** = percentile · vertex **labels** = Per90 (or %)
 - Bands: Elite 90–100 · Strong 70–89 · Average 30–69 · Below 0–29
 - Goals conceded & fouls: lower is better (percentile inverted)
             """
@@ -1033,6 +1062,7 @@ with st.expander(T["method_title"], expanded=False):
 - パス成功率 = 成功パス合計 ÷ パス合計
 - 比較は同じポジション内
 - Percentileは最低出場時間以上の選手のみが母集団
+- レーダーの**形** = Percentile · 頂点の**数字** = Per90（または%）
 - 帯: Elite 90–100 · Strong 70–89 · Average 30–69 · Below 0–29
 - 失点・ファウルは少ないほど高Percentile（反転）
             """
