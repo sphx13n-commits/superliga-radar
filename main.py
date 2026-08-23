@@ -67,7 +67,6 @@ def fmt_num(x, kind="raw"):
 
 
 def fmt_radar_label(v, is_ratio=False):
-    """レーダー頂点用。比率は1小数、それ以外は最大2小数。"""
     if v is None:
         return "—"
     try:
@@ -314,14 +313,16 @@ def format_updated_at(iso_str):
 
 def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, display_texts):
     """
-    values: Percentile (0-100) → 形
-    display_texts: Per90 / % の文字列 → 頂点ラベル
+    values: Percentile → 形
+    display_texts: Per90/% → 数字（常に外側の固定位置）
     """
     r_poly = values + [values[0]]
     theta = labels + [labels[0]]
     colors_closed = marker_colors + [marker_colors[0]]
 
-    r_text = [min(v + 16, 116) for v in values]
+    # 数字は中心に寄せず、常に外側リングへ
+    OUTER_R = 108
+    r_text = [OUTER_R] * len(values)
     r_text_closed = r_text + [r_text[0]]
     text_closed = list(display_texts) + [display_texts[0]]
 
@@ -349,7 +350,7 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, di
             mode="text",
             text=text_closed,
             textfont={
-                "size": 24,
+                "size": 22,
                 "color": NAVY,
                 "family": "Arial Black, Arial, sans-serif",
             },
@@ -1009,7 +1010,11 @@ else:
             st.image(png, use_container_width=True)
             st.caption(
                 T["band_legend"]
-                + (" · Shape = percentile · Labels = Per90/%" if is_en else " · 形=Percentile · 数字=Per90/%")
+                + (
+                    " · Shape = percentile · Labels = Per90/%"
+                    if is_en
+                    else " · 形=Percentile · 数字=Per90/%"
+                )
             )
             st.download_button(
                 T["download"],
