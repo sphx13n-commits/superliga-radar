@@ -27,7 +27,6 @@ LEAGUE_ID = 271
 CACHE_ROOT = Path(__file__).with_name("cache") / "superliga"
 POSITION_MAP = {24: "GK", 25: "DEF", 26: "MID", 27: "FWD"}
 
-# レーダー頂点用の淡色
 BAND_ELITE = "#5C7A9A"
 BAND_STRONG = "#8BB0F5"
 BAND_AVG = "#C5D0DE"
@@ -47,7 +46,6 @@ def percentile_band(p):
 
 
 def fmt_num(x, kind="raw"):
-    """表表示用。末尾の不要な0を落とす。"""
     if x is None:
         return "—"
     if isinstance(x, str):
@@ -294,13 +292,16 @@ def format_updated_at(iso_str):
         return str(iso_str)[:19]
 
 
-def build_radar_figure(labels, values, title_lines, marker_colors):
-    """大きめ文字・外側数字・淡色頂点。塗りは単色。"""
+def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
+    """
+    Ben寄り: 大きなタイトル・軸・数字 + 下部にデータ注釈。
+    footnotes: list[str]
+    """
     r_poly = values + [values[0]]
     theta = labels + [labels[0]]
     colors_closed = marker_colors + [marker_colors[0]]
 
-    r_text = [min(v + 16, 117) for v in values]
+    r_text = [min(v + 18, 118) for v in values]
     r_text_closed = r_text + [r_text[0]]
     text_vals = [f"{int(round(v))}" for v in values]
     text_closed = text_vals + [text_vals[0]]
@@ -312,12 +313,11 @@ def build_radar_figure(labels, values, title_lines, marker_colors):
             theta=theta,
             fill="toself",
             fillcolor=NAVY_SOFT,
-            line={"color": NAVY, "width": 3.6},
+            line={"color": NAVY, "width": 3.8},
             marker={
                 "color": colors_closed,
-                "size": 18,
-                "line": {"color": NAVY, "width": 1.5},
-                "opacity": 0.95,
+                "size": 20,
+                "line": {"color": NAVY, "width": 1.6},
             },
             mode="lines+markers",
             hovertemplate="%{theta}: %{r:.0f}<extra></extra>",
@@ -330,7 +330,7 @@ def build_radar_figure(labels, values, title_lines, marker_colors):
             mode="text",
             text=text_closed,
             textfont={
-                "size": 26,
+                "size": 30,
                 "color": NAVY,
                 "family": "Arial Black, Arial, sans-serif",
             },
@@ -339,7 +339,8 @@ def build_radar_figure(labels, values, title_lines, marker_colors):
     )
 
     annotations = []
-    sizes = [52, 24, 18]
+    # タイトル（かなり大きく）
+    title_sizes = [56, 26, 20]
     for i, line in enumerate(title_lines):
         annotations.append(
             {
@@ -347,25 +348,43 @@ def build_radar_figure(labels, values, title_lines, marker_colors):
                 "xref": "paper",
                 "yref": "paper",
                 "x": 0.5,
-                "y": 0.998 - i * 0.055,
+                "y": 0.995 - i * 0.048,
                 "xanchor": "center",
                 "yanchor": "top",
                 "showarrow": False,
                 "font": {
                     "color": NAVY,
-                    "size": sizes[i] if i < len(sizes) else 16,
+                    "size": title_sizes[i] if i < len(title_sizes) else 18,
                     "family": "Arial",
                 },
             }
         )
+
+    # 下部注釈（PNG用）
+    base_y = 0.125
+    for i, line in enumerate(footnotes or []):
+        annotations.append(
+            {
+                "text": line,
+                "xref": "paper",
+                "yref": "paper",
+                "x": 0.02,
+                "y": base_y - i * 0.028,
+                "xanchor": "left",
+                "yanchor": "top",
+                "showarrow": False,
+                "font": {"color": "#4B5563", "size": 14, "family": "Arial"},
+            }
+        )
+
     annotations.append(
         {
             "text": "<b>@Dalaprospect</b>",
             "xref": "paper",
             "yref": "paper",
-            "x": 0.93,
-            "y": 0.012,
-            "xanchor": "center",
+            "x": 0.98,
+            "y": 0.02,
+            "xanchor": "right",
             "yanchor": "bottom",
             "showarrow": False,
             "font": {"color": NAVY, "size": 16, "family": "Arial"},
@@ -380,11 +399,11 @@ def build_radar_figure(labels, values, title_lines, marker_colors):
                 "source": logo,
                 "xref": "paper",
                 "yref": "paper",
-                "x": 0.93,
-                "y": 0.058,
-                "sizex": 0.095,
-                "sizey": 0.095,
-                "xanchor": "center",
+                "x": 0.98,
+                "y": 0.055,
+                "sizex": 0.09,
+                "sizey": 0.09,
+                "xanchor": "right",
                 "yanchor": "bottom",
                 "sizing": "contain",
                 "layer": "above",
@@ -392,30 +411,32 @@ def build_radar_figure(labels, values, title_lines, marker_colors):
         )
 
     fig.update_layout(
-        height=1020,
-        margin={"l": 56, "r": 56, "t": 190, "b": 100},
+        height=1280,
+        width=1000,
+        margin={"l": 70, "r": 70, "t": 200, "b": 200},
         paper_bgcolor=WHITE,
         plot_bgcolor=WHITE,
         showlegend=False,
         images=images,
         annotations=annotations,
         polar={
-            "domain": {"x": [0.02, 0.98], "y": [0.03, 0.66]},
+            # 上寄りにして下部注釈スペースを確保
+            "domain": {"x": [0.06, 0.94], "y": [0.22, 0.72]},
             "bgcolor": BG,
             "radialaxis": {
                 "visible": True,
-                "range": [0, 120],
+                "range": [0, 122],
                 "tickvals": [0, 20, 40, 60, 80, 100],
                 "gridcolor": GRID,
                 "linecolor": AXIS,
-                "tickfont": {"color": AXIS, "size": 14},
+                "tickfont": {"color": AXIS, "size": 15},
             },
             "angularaxis": {
                 "gridcolor": GRID,
                 "linecolor": AXIS,
                 "tickfont": {
                     "color": NAVY,
-                    "size": 22,
+                    "size": 26,
                     "family": "Arial Black, Arial, sans-serif",
                 },
                 "rotation": 90,
@@ -898,6 +919,7 @@ else:
         selected = all_players[labels.index(choice)]
         pos = selected["Pos"]
         mdefs = POSITION_METRICS[pos]
+        n_pos = len(by_pos[pos])
 
         st.markdown(
             f"""
@@ -942,6 +964,21 @@ else:
             radar_values.append(pct if pct is not None else 0)
             marker_colors.append(band_color)
 
+        if is_en:
+            footnotes = [
+                f"Axes = within-position percentiles (0–100) · Sample: {pos} with ≥{int(min_min)} min (n={n_pos})",
+                "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30  |  Conc./Fouls inverted",
+                "Per90 uses Minutes Played · Pass Acc = Σ accurate ÷ Σ passes · Fixture aggregate (Sportmonks)",
+                f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
+            ]
+        else:
+            footnotes = [
+                f"軸 = 同ポジション内Percentile（0–100） · 母集団: {pos}・{int(min_min)}分以上（n={n_pos}）",
+                "帯: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満 ｜ 失点・ファウルは反転",
+                "Per90分母はMinutes Played · パス成功率は合計÷合計 · 試合集計（Sportmonks）",
+                f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
+            ]
+
         fig = build_radar_figure(
             radar_labels,
             radar_values,
@@ -951,9 +988,10 @@ else:
                 f"Superliga {season_name} · Percentile radar",
             ],
             marker_colors,
+            footnotes,
         )
         try:
-            png = fig.to_image(format="png", width=1000, height=1320, scale=2)
+            png = fig.to_image(format="png", width=1000, height=1280, scale=2)
             st.image(png, use_container_width=True)
             st.caption(T["band_legend"])
             st.download_button(
@@ -967,7 +1005,6 @@ else:
 
         st.markdown(f"##### {T['stats']}")
         df = pd.DataFrame(check_rows)
-        # 文字列のまま表示（Streamlitがfloatに戻して 54.000000 にしない）
         st.dataframe(
             df.style.map(style_percentile_col, subset=["Percentile"]),
             use_container_width=True,
