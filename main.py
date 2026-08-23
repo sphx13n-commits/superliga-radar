@@ -16,8 +16,7 @@ AXIS = "#6B82A0"
 BG = "#EEF2F7"
 WHITE = "#FFFFFF"
 
-MINUTES_119 = 119
-MINUTES_117172 = 117172
+MINUTES_TYPE_ID = 119  # 正式採用: minutes-played
 
 _, language_column = st.columns([4, 1])
 with language_column:
@@ -75,7 +74,7 @@ KNOWN_NAMES = {
     101: ("Clearances", "クリア"),
     107: ("Aerials won", "空中戦"),
     109: ("Successful dribbles", "ドリブル成功"),
-    119: ("Minutes (season)", "出場時間"),
+    119: ("Minutes", "出場時間"),
     194: ("Clean sheets", "無失点"),
     214: ("Team wins", "勝利"),
     215: ("Team draws", "引き分け"),
@@ -401,13 +400,58 @@ except Exception as e:
 
 
 # ============================================================
-# Minutes 比較: type_id 119 vs 117172 のみ
+# Percentile Prototype（少数Fixture・計算検証のみ）
+# Minutes分母 = type_id 119
 # ============================================================
 st.divider()
-st.subheader("Minutes比較: 119 vs 117172（一時）")
+st.subheader("Percentile Prototype（一時）")
 st.caption(
-    "同一Fixture内で minutes-played(119) と cumulative-minutes-played(117172) を並べます。"
+    "少数Fixtureの合算で、ポジション別指標とパーセンタイル計算を検証します。"
+    "サンプルが少ないため評価用途には使いません。"
 )
+
+# ポジション別指標定義
+# kind: per90 | ratio | lower_better_per90
+POSITION_METRICS = {
+    "GK": [
+        {"key": "saves_p90", "label": "Saves/90", "tid": 57, "kind": "per90"},
+        {"key": "saves_box_p90", "label": "Saves in box/90", "tid": 104, "kind": "per90"},
+        {"key": "conceded_p90", "label": "Goals conc./90", "tid": 88, "kind": "lower_better_per90"},
+        {"key": "pass_acc", "label": "Pass Acc %", "tid": None, "kind": "ratio", "num": 116, "den": 80},
+        {"key": "acc_passes_p90", "label": "Acc. Passes/90", "tid": 116, "kind": "per90"},
+        {"key": "long_balls_p90", "label": "Long Balls/90", "tid": 122, "kind": "per90"},
+        {"key": "recovery_p90", "label": "Ball Recovery/90", "tid": 27271, "kind": "per90"},
+    ],
+    "DEF": [
+        {"key": "tackles_p90", "label": "Tackles/90", "tid": 78, "kind": "per90"},
+        {"key": "intercepts_p90", "label": "Intercepts/90", "tid": 100, "kind": "per90"},
+        {"key": "clearances_p90", "label": "Clearances/90", "tid": 101, "kind": "per90"},
+        {"key": "aerials_p90", "label": "Aerials/90", "tid": 107, "kind": "per90"},
+        {"key": "pass_acc", "label": "Pass Acc %", "tid": None, "kind": "ratio", "num": 116, "den": 80},
+        {"key": "acc_passes_p90", "label": "Acc. Passes/90", "tid": 116, "kind": "per90"},
+        {"key": "recovery_p90", "label": "Ball Recovery/90", "tid": 27271, "kind": "per90"},
+    ],
+    "MID": [
+        {"key": "passes_p90", "label": "Passes/90", "tid": 80, "kind": "per90"},
+        {"key": "pass_acc", "label": "Pass Acc %", "tid": None, "kind": "ratio", "num": 116, "den": 80},
+        {"key": "key_passes_p90", "label": "Key Passes/90", "tid": 117, "kind": "per90"},
+        {"key": "assists_p90", "label": "Assists/90", "tid": 79, "kind": "per90"},
+        {"key": "tackles_p90", "label": "Tackles/90", "tid": 78, "kind": "per90"},
+        {"key": "intercepts_p90", "label": "Intercepts/90", "tid": 100, "kind": "per90"},
+        {"key": "succ_dribbles_p90", "label": "Succ. Dribbles/90", "tid": 109, "kind": "per90"},
+        {"key": "recovery_p90", "label": "Ball Recovery/90", "tid": 27271, "kind": "per90"},
+    ],
+    "FWD": [
+        {"key": "goals_p90", "label": "Goals/90", "tid": 52, "kind": "per90"},
+        {"key": "assists_p90", "label": "Assists/90", "tid": 79, "kind": "per90"},
+        {"key": "shots_p90", "label": "Shots/90", "tid": 42, "kind": "per90"},
+        {"key": "sot_p90", "label": "SOT/90", "tid": 86, "kind": "per90"},
+        {"key": "key_passes_p90", "label": "Key Passes/90", "tid": 117, "kind": "per90"},
+        {"key": "dribble_att_p90", "label": "Dribble Att/90", "tid": 108, "kind": "per90"},
+        {"key": "succ_dribbles_p90", "label": "Succ. Dribbles/90", "tid": 109, "kind": "per90"},
+        {"key": "aerials_p90", "label": "Aerials/90", "tid": 107, "kind": "per90"},
+    ],
+}
 
 _proto_token = os.getenv("SPORTMONKS_TOKEN")
 if _proto_token:
@@ -426,16 +470,7 @@ if _proto_token:
             except ValueError:
                 return None
         if isinstance(obj, dict):
-            for k in (
-                "total",
-                "minutes",
-                "minute",
-                "value",
-                "average",
-                "count",
-                "sum",
-                "percentage",
-            ):
+            for k in ("total", "minutes", "value", "average", "count", "sum", "percentage"):
                 if k in obj:
                     n = _deep_num(obj[k])
                     if n is not None:
@@ -461,17 +496,38 @@ if _proto_token:
                     return n
         return None
 
+    def percentile_rank(values, target, higher_is_better=True):
+        """平均ランク方式。同値でも安定。0〜100。"""
+        n = len(values)
+        if n <= 1:
+            return 50.0
+        if higher_is_better:
+            below = sum(1 for v in values if v < target)
+            equal = sum(1 for v in values if v == target)
+        else:
+            below = sum(1 for v in values if v > target)
+            equal = sum(1 for v in values if v == target)
+        # 平均ランク: below + (equal-1)/2
+        rank = below + (equal - 1) / 2.0
+        return round(100.0 * rank / (n - 1), 1) if n > 1 else 50.0
+
     c1, c2, c3 = st.columns(3)
     with c1:
-        start_d = st.text_input("開始日", value="2026-07-20", key="mc_start")
+        start_d = st.text_input("開始日", value="2026-07-20", key="pp_start")
     with c2:
-        end_d = st.text_input("終了日", value="2026-08-20", key="mc_end")
+        end_d = st.text_input("終了日", value="2026-08-20", key="pp_end")
     with c3:
-        max_fx = st.number_input("最大試合数", min_value=1, max_value=5, value=3, key="mc_max")
+        max_fx = st.number_input("最大試合数", min_value=2, max_value=5, value=4, key="pp_max")
 
-    focus_team = st.text_input("優先チーム", value="AGF", key="mc_team")
+    focus_team = st.text_input("優先チーム", value="AGF", key="pp_team")
+    min_minutes = st.selectbox(
+        "最低出場分（将来用・今回は0推奨）",
+        options=[0, 300, 600, 900],
+        index=0,
+        key="pp_minmin",
+    )
 
-    if st.button("Minutes比較を実行", key="mc_run"):
+    if st.button("Percentile Prototype を実行", key="pp_run"):
         try:
             between_res = requests.get(
                 f"{_base}/fixtures/between/{start_d}/{end_d}",
@@ -501,24 +557,31 @@ if _proto_token:
                 focused = [fx for fx in all_fx if involves(fx)]
                 focused.sort(key=lambda x: x.get("starting_at") or "")
                 selected = focused[: int(max_fx)]
-                if not selected:
-                    selected = all_fx[: int(max_fx)]
+                if len(selected) < int(max_fx):
+                    rest = [fx for fx in all_fx if fx not in selected]
+                    rest.sort(key=lambda x: x.get("starting_at") or "")
+                    selected += rest[: int(max_fx) - len(selected)]
 
-                st.write(f"使用Fixture数: {len(selected)}")
-                rows = []
-                meta_119 = None
-                meta_117172 = None
-                count_119_present = 0
-                count_119_nonnull = 0
-                count_117172_nonnull = 0
-                equal_count = 0
-                compare_count = 0
+                st.write(
+                    f"使用Fixture: {len(selected)} "
+                    f"（『{focus_team}』関連 {len(focused)} / 期間内 {len(all_fx)}）"
+                )
+                st.dataframe(
+                    [
+                        {
+                            "fixture_id": fx.get("id"),
+                            "match": fx.get("name"),
+                            "date": (fx.get("starting_at") or "")[:10],
+                        }
+                        for fx in selected
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
+                aggs = {}
                 for fx in selected:
                     fid = fx.get("id")
-                    fname = fx.get("name") or str(fid)
-                    fdate = (fx.get("starting_at") or "")[:10]
-
                     fr = requests.get(
                         f"{_base}/fixtures/{fid}",
                         headers=_headers,
@@ -528,9 +591,8 @@ if _proto_token:
                     if fr.status_code != 200:
                         st.warning(f"{fid} 失敗: {fr.status_code}")
                         continue
-
                     lineups = ((fr.json() or {}).get("data") or {}).get("lineups") or []
-                    st.caption(f"{fid}: lineups={len(lineups)} / {fname}")
+                    st.caption(f"fixture {fid}: lineups={len(lineups)}")
 
                     for lu in lineups:
                         pid = lu.get("player_id")
@@ -541,138 +603,176 @@ if _proto_token:
                             or lu.get("player_name")
                             or f"id:{pid}"
                         )
-                        lineup_type = lu.get("type_id")  # 11 start, 12 bench
-                        role = (
-                            "start"
-                            if lineup_type == 11
-                            else "bench"
-                            if lineup_type == 12
-                            else str(lineup_type)
+                        pos_id = lu.get("position_id") or (
+                            (lu.get("player") or {}).get("position_id")
                         )
                         details = lu.get("details") or []
 
-                        v119 = None
-                        v117172 = None
-                        present_119 = False
-                        present_117172 = False
-                        raw_119 = None
-                        raw_117172 = None
+                        if pid not in aggs:
+                            aggs[pid] = {
+                                "player_id": pid,
+                                "player_name": pname,
+                                "position_id": pos_id,
+                                "minutes": 0.0,
+                                "raw": {},
+                            }
+                        else:
+                            if pname and str(aggs[pid]["player_name"]).startswith("id:"):
+                                aggs[pid]["player_name"] = pname
+                            if pos_id and not aggs[pid]["position_id"]:
+                                aggs[pid]["position_id"] = pos_id
 
                         for d in details:
                             tid = d.get("type_id")
-                            t = d.get("type") or {}
-                            if tid == MINUTES_119:
-                                present_119 = True
-                                count_119_present += 1
-                                raw_119 = d.get("data")
-                                v119 = _extract_stat(d)
-                                if meta_119 is None:
-                                    meta_119 = {
-                                        "type_id": tid,
-                                        "code": t.get("code"),
-                                        "name": t.get("name"),
-                                        "developer_name": t.get("developer_name"),
-                                        "data_sample": d.get("data"),
-                                    }
-                                if v119 is not None:
-                                    count_119_nonnull += 1
-                            elif tid == MINUTES_117172:
-                                present_117172 = True
-                                raw_117172 = d.get("data")
-                                v117172 = _extract_stat(d)
-                                if meta_117172 is None:
-                                    meta_117172 = {
-                                        "type_id": tid,
-                                        "code": t.get("code"),
-                                        "name": t.get("name"),
-                                        "developer_name": t.get("developer_name"),
-                                        "data_sample": d.get("data"),
-                                    }
-                                if v117172 is not None:
-                                    count_117172_nonnull += 1
+                            if tid is None:
+                                continue
+                            parsed = _extract_stat(d)
+                            if parsed is None:
+                                continue
+                            if tid == MINUTES_TYPE_ID:
+                                aggs[pid]["minutes"] += parsed
+                            else:
+                                aggs[pid]["raw"][tid] = (
+                                    aggs[pid]["raw"].get(tid, 0.0) + parsed
+                                )
 
-                        # 比較対象: どちらかに分がある選手
-                        if v119 is None and v117172 is None and not present_119 and not present_117172:
-                            continue
+                # 指標計算
+                players_calc = []
+                for a in aggs.values():
+                    mins = a["minutes"]
+                    if mins < float(min_minutes):
+                        continue
+                    if mins <= 0:
+                        continue
+                    pos = POSITION_MAP.get(a["position_id"])
+                    if pos not in POSITION_METRICS:
+                        continue
+                    raw = a["raw"]
+                    metrics = {}
+                    for m in POSITION_METRICS[pos]:
+                        if m["kind"] in ("per90", "lower_better_per90"):
+                            metrics[m["key"]] = round(
+                                raw.get(m["tid"], 0.0) * 90.0 / mins, 3
+                            )
+                        elif m["kind"] == "ratio":
+                            den = raw.get(m["den"], 0.0)
+                            num = raw.get(m["num"], 0.0)
+                            metrics[m["key"]] = (
+                                round(num / den * 100.0, 2) if den > 0 else None
+                            )
+                    players_calc.append(
+                        {
+                            "player_id": a["player_id"],
+                            "Player": a["player_name"],
+                            "Pos": pos,
+                            "position_id": a["position_id"],
+                            "Minutes": int(round(mins)),
+                            "metrics": metrics,
+                        }
+                    )
 
-                        same = None
-                        if v119 is not None and v117172 is not None:
-                            compare_count += 1
-                            same = abs(v119 - v117172) < 0.01
-                            if same:
-                                equal_count += 1
+                # ① ポジション人数
+                st.markdown("#### ① Positionごとの選手数（Minutes>0）")
+                counts = {p: 0 for p in ("GK", "DEF", "MID", "FWD")}
+                for p in players_calc:
+                    counts[p["Pos"]] = counts.get(p["Pos"], 0) + 1
+                st.write(counts)
 
-                        # 出場カテゴリの目安
-                        category = "unknown"
-                        m = v117172 if v117172 is not None else v119
-                        if m is not None:
-                            if role == "start" and m >= 90:
-                                category = "フル出場寄り"
-                            elif role == "start" and m < 90:
-                                category = "先発・途中交代寄り"
-                            elif role == "bench" and m > 0:
-                                category = "途中出場"
-                            elif m == 0:
-                                category = "出場なし"
+                # ポジション内パーセンタイル
+                for pos in ("GK", "DEF", "MID", "FWD"):
+                    group = [p for p in players_calc if p["Pos"] == pos]
+                    if not group:
+                        continue
+                    metric_defs = POSITION_METRICS[pos]
 
-                        rows.append(
+                    # 各指標の値リスト
+                    for m in metric_defs:
+                        vals = [
+                            g["metrics"][m["key"]]
+                            for g in group
+                            if g["metrics"].get(m["key"]) is not None
+                        ]
+                        higher = m["kind"] != "lower_better_per90"
+                        for g in group:
+                            v = g["metrics"].get(m["key"])
+                            if v is None:
+                                g.setdefault("pct", {})[m["key"]] = None
+                            else:
+                                g.setdefault("pct", {})[m["key"]] = percentile_rank(
+                                    vals, v, higher_is_better=higher
+                                )
+
+                    st.markdown(f"#### ② {pos} — Per90 / %（{len(group)}人）")
+                    raw_table = []
+                    for g in sorted(group, key=lambda x: x["Minutes"], reverse=True):
+                        row = {
+                            "Player": g["Player"],
+                            "Minutes": g["Minutes"],
+                        }
+                        for m in metric_defs:
+                            row[m["label"]] = g["metrics"].get(m["key"])
+                        raw_table.append(row)
+                    st.dataframe(raw_table, use_container_width=True, hide_index=True)
+
+                    st.markdown(f"#### ③ {pos} — Percentile 0–100")
+                    pct_table = []
+                    for g in sorted(group, key=lambda x: x["Minutes"], reverse=True):
+                        row = {
+                            "Player": g["Player"],
+                            "Pos": pos,
+                            "Minutes": g["Minutes"],
+                        }
+                        for m in metric_defs:
+                            row[m["label"]] = g.get("pct", {}).get(m["key"])
+                        pct_table.append(row)
+                    st.dataframe(pct_table, use_container_width=True, hide_index=True)
+
+                # ④ 1名サンプル詳細
+                st.markdown("#### ④ サンプル: Raw → 順位 → Percentile")
+                if players_calc:
+                    # 分が多い選手を1人
+                    sample = max(players_calc, key=lambda x: x["Minutes"])
+                    pos = sample["Pos"]
+                    group = [p for p in players_calc if p["Pos"] == pos]
+                    st.markdown(
+                        f"**{sample['Player']}**（{pos}, {sample['Minutes']}分, "
+                        f"同ポジション {len(group)}人中）"
+                    )
+                    detail_rows = []
+                    for m in POSITION_METRICS[pos]:
+                        v = sample["metrics"].get(m["key"])
+                        vals = [
+                            g["metrics"][m["key"]]
+                            for g in group
+                            if g["metrics"].get(m["key"]) is not None
+                        ]
+                        higher = m["kind"] != "lower_better_per90"
+                        if v is None or not vals:
+                            rank_disp = None
+                            pct = None
+                        else:
+                            if higher:
+                                better = sum(1 for x in vals if x > v)
+                                rank_disp = better + 1  # 1位が最高
+                            else:
+                                better = sum(1 for x in vals if x < v)
+                                rank_disp = better + 1
+                            pct = sample.get("pct", {}).get(m["key"])
+                        detail_rows.append(
                             {
-                                "fixture_id": fid,
-                                "match": fname,
-                                "date": fdate,
-                                "Player": pname,
-                                "player_id": pid,
-                                "role": role,
-                                "category": category,
-                                "119_present": present_119,
-                                "119_data": v119,
-                                "117172_data": v117172,
-                                "same": same,
-                                "diff": (
-                                    round(v117172 - v119, 2)
-                                    if v119 is not None and v117172 is not None
-                                    else None
-                                ),
+                                "指標": m["label"],
+                                "Raw": v,
+                                "向き": "低いほど良" if not higher else "高いほど良",
+                                "同POS人数": len(vals),
+                                "順位(1=最良)": rank_disp,
+                                "Percentile": pct,
                             }
                         )
-
-                st.markdown("#### type 定義（レスポンスから）")
-                st.write({"119": meta_119, "117172": meta_117172})
-
-                st.markdown("#### 件数サマリー")
-                st.write(
-                    {
-                        "行数(分情報あり)": len(rows),
-                        "119がdetailsに存在した回数": count_119_present,
-                        "119のdataが数値だった回数": count_119_nonnull,
-                        "117172のdataが数値だった回数": count_117172_nonnull,
-                        "両方数値で比較した回数": compare_count,
-                        "数値が一致した回数": equal_count,
-                    }
-                )
-
-                st.markdown("#### 比較一覧（全件）")
-                st.dataframe(rows, use_container_width=True, hide_index=True)
-
-                # カテゴリ別にサンプル抽出
-                st.markdown("#### カテゴリ別サンプル")
-                for cat in ("フル出場寄り", "先発・途中交代寄り", "途中出場"):
-                    subset = [r for r in rows if r["category"] == cat]
-                    st.caption(f"{cat}: {len(subset)}件")
-                    if subset:
-                        st.dataframe(
-                            subset[:5], use_container_width=True, hide_index=True
-                        )
-
-                # 90超の行
-                over = [
-                    r
-                    for r in rows
-                    if (r["117172_data"] or 0) > 90 or (r["119_data"] or 0) > 90
-                ]
-                st.markdown(f"#### 90分超の行: {len(over)}件")
-                if over:
-                    st.dataframe(over[:15], use_container_width=True, hide_index=True)
+                    st.dataframe(detail_rows, use_container_width=True, hide_index=True)
+                    st.caption(
+                        "Goals conc./90 のみ「低いほど Percentile が高い」。"
+                        "少数サンプルのため数値は検証用です。"
+                    )
 
         except Exception as e:
-            st.error(f"比較エラー: {e}")
+            st.error(f"Prototype エラー: {e}")
