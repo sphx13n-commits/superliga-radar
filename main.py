@@ -42,10 +42,13 @@ TEXT = {
     "team_list": " squad" if is_english else "の選手一覧",
     "target_players": "Shown" if is_english else "対象選手",
     "all_players": "total" if is_english else "全",
-    "per90_note": "Numbers on the chart are per 90 minutes (not percentiles)."
+    "per90_note": "Chart values are per 90 minutes (not percentiles)."
     if is_english
-    else "チャート上の数字は「90分あたりの回数」です（パーセンタイルではありません）。",
-    "download": "Download PNG" if is_english else "画像をダウンロード",
+    else "チャートの数字は90分あたりの回数です（パーセンタイルではありません）。",
+    "save_hint": "Long-press the image below to save it to Photos."
+    if is_english
+    else "下の画像を長押しすると、写真に保存できます。",
+    "download": "Download PNG" if is_english else "PNGをダウンロード",
     "no_players": "No players found" if is_english else "選手データがありません",
     "no_stats": "No stats available" if is_english else "この選手のスタッツがありません",
     "scale_explain": "Scale: actions per 90 minutes"
@@ -58,8 +61,7 @@ st.markdown(
     <style>
       .block-container { padding-top: 0.8rem; padding-bottom: 1.2rem; }
       div[data-testid="stVerticalBlock"] > div { gap: 0.25rem !important; }
-      .stPlotlyChart { margin-top: -1.1rem !important; margin-bottom: -0.4rem !important; }
-      [data-testid="stCaption"] { margin-top: 0.2rem !important; }
+      .stPlotlyChart { margin-top: -1.0rem !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -86,7 +88,8 @@ base_url = "https://api.sportmonks.com/v3/football"
 default_season_id = 27897
 season_id = default_season_id
 
-STATISTIC_NAMES = {
+# 画面用（日本語） / 書き出し用（英語・文字化け防止）
+STATISTIC_NAMES_JA = {
     52: "ゴール",
     79: "アシスト",
     194: "シュート",
@@ -134,6 +137,104 @@ def get_logo_data_uri():
     logo_bytes = logo_path.read_bytes()
     encoded_logo = base64.b64encode(logo_bytes).decode("ascii")
     return f"data:image/png;base64,{encoded_logo}"
+
+
+def build_radar_figure(labels, values, title_lines, radial_max, for_export=False):
+    chart_labels = labels + [labels[0]]
+    chart_values = values + [values[0]]
+
+    fig = go.Figure(
+        go.Scatterpolar(
+            r=chart_values,
+            theta=chart_labels,
+            fill="toself",
+            fillcolor=NAVY_SOFT,
+            line={"color": NAVY, "width": 3.5},
+            marker={
+                "color": WHITE,
+                "size": 9,
+                "line": {"color": NAVY, "width": 2.5},
+            },
+            mode="lines+markers",
+            hovertemplate="%{theta}: %{r}<extra></extra>",
+        )
+    )
+
+    annotations = [
+        {
+            "text": line,
+            "xref": "paper",
+            "yref": "paper",
+            "x": 0.02,
+            "y": 0.98 - i * 0.045,
+            "xanchor": "left",
+            "yanchor": "top",
+            "showarrow": False,
+            "font": {
+                "color": NAVY,
+                "size": 18 if i == 0 else 13,
+                "family": "Arial",
+            },
+        }
+        for i, line in enumerate(title_lines)
+    ]
+    annotations.append(
+        {
+            "text": "@Dalaprospect",
+            "xref": "paper",
+            "yref": "paper",
+            "x": 0.86,
+            "y": 0.03,
+            "xanchor": "right",
+            "yanchor": "middle",
+            "showarrow": False,
+            "font": {"color": NAVY, "size": 14, "family": "Arial"},
+        }
+    )
+
+    fig.update_layout(
+        height=720 if for_export else 540,
+        margin={"l": 50, "r": 50, "t": 90 if for_export else 20, "b": 70},
+        paper_bgcolor=WHITE,
+        plot_bgcolor=WHITE,
+        font={"color": NAVY, "size": 13, "family": "Arial"},
+        showlegend=False,
+        images=[
+            {
+                "source": get_logo_data_uri(),
+                "xref": "paper",
+                "yref": "paper",
+                "x": 0.99,
+                "y": 0.0,
+                "sizex": 0.10,
+                "sizey": 0.10,
+                "xanchor": "right",
+                "yanchor": "bottom",
+                "sizing": "contain",
+                "layer": "above",
+            }
+        ],
+        annotations=annotations,
+        polar={
+            "bgcolor": BG,
+            "radialaxis": {
+                "visible": True,
+                "range": [0, radial_max],
+                "gridcolor": GRID,
+                "linecolor": AXIS,
+                "tickfont": {"color": AXIS, "size": 11, "family": "Arial"},
+                "showline": True,
+            },
+            "angularaxis": {
+                "gridcolor": GRID,
+                "linecolor": AXIS,
+                "tickfont": {"color": NAVY, "size": 13, "family": "Arial"},
+                "rotation": 90,
+                "direction": "clockwise",
+            },
+        },
+    )
+    return fig
 
 
 try:
@@ -269,8 +370,8 @@ try:
         if tid in RADAR_ORDER and isinstance(val, (int, float)):
             raw_by_id[tid] = val
 
-    names = STATISTIC_NAMES_EN if is_english else STATISTIC_NAMES
-    labels = [names[i] for i in RADAR_ORDER]
+    labels_ja = [STATISTIC_NAMES_JA[i] for i in RADAR_ORDER]
+    labels_en = [STATISTIC_NAMES_EN[i] for i in RADAR_ORDER]
     raw_values = [raw_by_id.get(i, 0) for i in RADAR_ORDER]
 
     minutes = get_minutes(selected_player)
@@ -313,97 +414,47 @@ try:
     if sum(display_values) == 0:
         st.info(TEXT["no_stats"])
     else:
-        chart_labels = labels + [labels[0]]
-        chart_values = display_values + [display_values[0]]
         radial_max = max(max(display_values) * 1.15, 1.0)
+        screen_labels = labels_en if is_english else labels_ja
 
-        fig = go.Figure(
-            go.Scatterpolar(
-                r=chart_values,
-                theta=chart_labels,
-                fill="toself",
-                fillcolor=NAVY_SOFT,
-                line={"color": NAVY, "width": 3.5},
-                marker={
-                    "color": WHITE,
-                    "size": 9,
-                    "line": {"color": NAVY, "width": 2.5},
-                },
-                mode="lines+markers",
-                hovertemplate="%{theta}: %{r} /90min<extra></extra>",
-            )
+        # 画面表示用（言語に合わせる）
+        fig_screen = build_radar_figure(
+            screen_labels,
+            display_values,
+            title_lines=[],
+            radial_max=radial_max,
+            for_export=False,
         )
-
-        fig.update_layout(
-            height=560,
-            margin={"l": 40, "r": 40, "t": 4, "b": 58},
-            paper_bgcolor=WHITE,
-            plot_bgcolor=WHITE,
-            font={"color": NAVY, "size": 12, "family": "Arial, sans-serif"},
-            showlegend=False,
-            images=[
-                {
-                    "source": get_logo_data_uri(),
-                    "xref": "paper",
-                    "yref": "paper",
-                    "x": 0.99,
-                    "y": 0.0,
-                    "sizex": 0.09,
-                    "sizey": 0.09,
-                    "xanchor": "right",
-                    "yanchor": "bottom",
-                    "sizing": "contain",
-                    "layer": "above",
-                }
-            ],
-            annotations=[
-                {
-                    "text": "@Dalaprospect",
-                    "xref": "paper",
-                    "yref": "paper",
-                    "x": 0.87,
-                    "y": 0.03,
-                    "xanchor": "right",
-                    "yanchor": "middle",
-                    "showarrow": False,
-                    "font": {"color": NAVY, "size": 13},
-                }
-            ],
-            polar={
-                "bgcolor": BG,
-                "radialaxis": {
-                    "visible": True,
-                    "range": [0, radial_max],
-                    "gridcolor": GRID,
-                    "linecolor": AXIS,
-                    "tickfont": {"color": AXIS, "size": 10},
-                    "showline": True,
-                },
-                "angularaxis": {
-                    "gridcolor": GRID,
-                    "linecolor": AXIS,
-                    "tickfont": {"color": NAVY, "size": 12},
-                    "rotation": 90,
-                    "direction": "clockwise",
-                },
-            },
-        )
-
         st.plotly_chart(
-            fig,
+            fig_screen,
             use_container_width=True,
             config={"displayModeBar": False},
         )
         st.caption(TEXT["per90_note"])
 
-        # 数値一覧（意味が分かる表）
-        cols = st.columns(4)
-        for i, (lab, val) in enumerate(zip(labels, display_values)):
-            with cols[i % 4]:
-                st.metric(lab, val)
+        # 書き出し用（英語ラベル + 選手情報を画像に焼き込み）
+        title_lines = [
+            selected_player_name,
+            f"{selected_team_name}  |  {minutes} min  |  {scale_label}",
+            f"Superliga  {season_name}",
+        ]
+        fig_export = build_radar_figure(
+            labels_en,
+            display_values,
+            title_lines=title_lines,
+            radial_max=radial_max,
+            for_export=True,
+        )
 
         try:
-            png_data = fig.to_image(format="png", width=900, height=1000, scale=2)
+            png_data = fig_export.to_image(
+                format="png",
+                width=900,
+                height=1100,
+                scale=2,
+            )
+            st.markdown(f"**{TEXT['save_hint']}**")
+            st.image(png_data, use_container_width=True)
             st.download_button(
                 label=TEXT["download"],
                 data=png_data,
