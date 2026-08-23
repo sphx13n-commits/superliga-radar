@@ -27,10 +27,11 @@ LEAGUE_ID = 271
 CACHE_ROOT = Path(__file__).with_name("cache") / "superliga"
 POSITION_MAP = {24: "GK", 25: "DEF", 26: "MID", 27: "FWD"}
 
-BAND_ELITE = "#0B1F3A"
-BAND_STRONG = "#2F6FED"
-BAND_AVG = "#8FA3BF"
-BAND_BELOW = "#C5CEDA"
+# レーダー頂点用の淡色
+BAND_ELITE = "#5C7A9A"
+BAND_STRONG = "#8BB0F5"
+BAND_AVG = "#C5D0DE"
+BAND_BELOW = "#E4E9F0"
 
 
 def percentile_band(p):
@@ -46,7 +47,7 @@ def percentile_band(p):
 
 
 def fmt_num(x, kind="raw"):
-    """表用の数値整形。"""
+    """表表示用。末尾の不要な0を落とす。"""
     if x is None:
         return "—"
     if isinstance(x, str):
@@ -54,15 +55,17 @@ def fmt_num(x, kind="raw"):
     try:
         v = float(x)
     except (TypeError, ValueError):
-        return x
+        return str(x)
     if kind == "pct":
-        return round(v, 1)
-    if kind == "per90":
-        return round(v, 2)
-    # raw
-    if abs(v - round(v)) < 1e-9:
-        return int(round(v))
-    return round(v, 1)
+        s = f"{v:.1f}"
+    elif kind == "per90":
+        s = f"{v:.2f}"
+    else:
+        if abs(v - round(v)) < 1e-9:
+            return str(int(round(v)))
+        s = f"{v:.2f}"
+    s = s.rstrip("0").rstrip(".")
+    return s if s else "0"
 
 
 POSITION_METRICS = {
@@ -292,54 +295,51 @@ def format_updated_at(iso_str):
 
 
 def build_radar_figure(labels, values, title_lines, marker_colors):
-    """
-    頂点マーカー + その外側に大きめのPercentile数字。
-    軸レンジを 0–118 にして数字用の余白を確保。
-    """
+    """大きめ文字・外側数字・淡色頂点。塗りは単色。"""
     r_poly = values + [values[0]]
     theta = labels + [labels[0]]
     colors_closed = marker_colors + [marker_colors[0]]
 
-    # 数字は頂点より外側（最大118）
-    r_text = [min(v + 14, 116) for v in values]
+    r_text = [min(v + 16, 117) for v in values]
     r_text_closed = r_text + [r_text[0]]
     text_vals = [f"{int(round(v))}" for v in values]
     text_closed = text_vals + [text_vals[0]]
 
     fig = go.Figure()
-
-    # 塗りつぶし＋線＋マーカー
     fig.add_trace(
         go.Scatterpolar(
             r=r_poly,
             theta=theta,
             fill="toself",
             fillcolor=NAVY_SOFT,
-            line={"color": NAVY, "width": 3.4},
+            line={"color": NAVY, "width": 3.6},
             marker={
                 "color": colors_closed,
-                "size": 16,
-                "line": {"color": WHITE, "width": 2.5},
+                "size": 18,
+                "line": {"color": NAVY, "width": 1.5},
+                "opacity": 0.95,
             },
             mode="lines+markers",
             hovertemplate="%{theta}: %{r:.0f}<extra></extra>",
         )
     )
-
-    # 数字専用トレース（マーカーなし）
     fig.add_trace(
         go.Scatterpolar(
             r=r_text_closed,
             theta=theta,
             mode="text",
             text=text_closed,
-            textfont={"size": 18, "color": NAVY, "family": "Arial Black, Arial"},
+            textfont={
+                "size": 26,
+                "color": NAVY,
+                "family": "Arial Black, Arial, sans-serif",
+            },
             hoverinfo="skip",
         )
     )
 
     annotations = []
-    sizes = [40, 20, 16]
+    sizes = [52, 24, 18]
     for i, line in enumerate(title_lines):
         annotations.append(
             {
@@ -347,20 +347,20 @@ def build_radar_figure(labels, values, title_lines, marker_colors):
                 "xref": "paper",
                 "yref": "paper",
                 "x": 0.5,
-                "y": 0.995 - i * 0.052,
+                "y": 0.998 - i * 0.055,
                 "xanchor": "center",
                 "yanchor": "top",
                 "showarrow": False,
                 "font": {
                     "color": NAVY,
-                    "size": sizes[i] if i < len(sizes) else 14,
+                    "size": sizes[i] if i < len(sizes) else 16,
                     "family": "Arial",
                 },
             }
         )
     annotations.append(
         {
-            "text": "@Dalaprospect",
+            "text": "<b>@Dalaprospect</b>",
             "xref": "paper",
             "yref": "paper",
             "x": 0.93,
@@ -368,9 +368,10 @@ def build_radar_figure(labels, values, title_lines, marker_colors):
             "xanchor": "center",
             "yanchor": "bottom",
             "showarrow": False,
-            "font": {"color": NAVY, "size": 14, "family": "Arial"},
+            "font": {"color": NAVY, "size": 16, "family": "Arial"},
         }
     )
+
     images = []
     logo = get_logo_data_uri()
     if logo:
@@ -380,9 +381,9 @@ def build_radar_figure(labels, values, title_lines, marker_colors):
                 "xref": "paper",
                 "yref": "paper",
                 "x": 0.93,
-                "y": 0.055,
-                "sizex": 0.09,
-                "sizey": 0.09,
+                "y": 0.058,
+                "sizex": 0.095,
+                "sizey": 0.095,
                 "xanchor": "center",
                 "yanchor": "bottom",
                 "sizing": "contain",
@@ -391,28 +392,32 @@ def build_radar_figure(labels, values, title_lines, marker_colors):
         )
 
     fig.update_layout(
-        height=960,
-        margin={"l": 52, "r": 52, "t": 175, "b": 92},
+        height=1020,
+        margin={"l": 56, "r": 56, "t": 190, "b": 100},
         paper_bgcolor=WHITE,
         plot_bgcolor=WHITE,
         showlegend=False,
         images=images,
         annotations=annotations,
         polar={
-            "domain": {"x": [0.03, 0.97], "y": [0.04, 0.68]},
+            "domain": {"x": [0.02, 0.98], "y": [0.03, 0.66]},
             "bgcolor": BG,
             "radialaxis": {
                 "visible": True,
-                "range": [0, 118],
+                "range": [0, 120],
                 "tickvals": [0, 20, 40, 60, 80, 100],
                 "gridcolor": GRID,
                 "linecolor": AXIS,
-                "tickfont": {"color": AXIS, "size": 13},
+                "tickfont": {"color": AXIS, "size": 14},
             },
             "angularaxis": {
                 "gridcolor": GRID,
                 "linecolor": AXIS,
-                "tickfont": {"color": NAVY, "size": 17},
+                "tickfont": {
+                    "color": NAVY,
+                    "size": 22,
+                    "family": "Arial Black, Arial, sans-serif",
+                },
                 "rotation": 90,
                 "direction": "clockwise",
             },
@@ -455,9 +460,15 @@ def style_percentile_col(val):
         p = float(val)
     except (TypeError, ValueError):
         return ""
-    _, color = percentile_band(p)
-    text = "#FFFFFF" if p >= 90 else NAVY
-    return f"background-color: {color}; color: {text}; font-weight: 600;"
+    if p >= 90:
+        color, text = "#0B1F3A", "#FFFFFF"
+    elif p >= 70:
+        color, text = "#2F6FED", "#FFFFFF"
+    elif p >= 30:
+        color, text = "#B7C4D6", NAVY
+    else:
+        color, text = "#E6EBF2", NAVY
+    return f"background-color: {color}; color: {text}; font-weight: 700;"
 
 
 # ----- season -----
@@ -921,7 +932,7 @@ else:
             check_rows.append(
                 {
                     "Metric": m["label"],
-                    "Raw": fmt_num(raw_v, "raw") if not isinstance(raw_v, str) else raw_v,
+                    "Raw": raw_v if isinstance(raw_v, str) else fmt_num(raw_v, "raw"),
                     "Per90 / %": fmt_num(selected["metrics"].get(m["key"]), "per90"),
                     "Percentile": fmt_num(pct, "pct"),
                     "Band": band_name,
@@ -942,7 +953,7 @@ else:
             marker_colors,
         )
         try:
-            png = fig.to_image(format="png", width=960, height=1280, scale=2)
+            png = fig.to_image(format="png", width=1000, height=1320, scale=2)
             st.image(png, use_container_width=True)
             st.caption(T["band_legend"])
             st.download_button(
@@ -956,6 +967,7 @@ else:
 
         st.markdown(f"##### {T['stats']}")
         df = pd.DataFrame(check_rows)
+        # 文字列のまま表示（Streamlitがfloatに戻して 54.000000 にしない）
         st.dataframe(
             df.style.map(style_percentile_col, subset=["Percentile"]),
             use_container_width=True,
