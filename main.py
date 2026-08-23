@@ -1,5 +1,7 @@
 import base64
+import json
 import os
+import time
 from datetime import date, datetime
 from pathlib import Path
 
@@ -16,7 +18,9 @@ AXIS = "#6B82A0"
 BG = "#EEF2F7"
 WHITE = "#FFFFFF"
 
-MINUTES_TYPE_ID = 119  # 正式採用: minutes-played
+MINUTES_TYPE_ID = 119
+LEAGUE_ID = 271
+CACHE_ROOT = Path(__file__).with_name("cache") / "superliga"
 
 _, language_column = st.columns([4, 1])
 with language_column:
@@ -236,9 +240,10 @@ def build_radar_figure(labels, values, title_lines, radial_max):
     return fig
 
 
+# ========== 既存：シーズンAPIレーダー（変更なし） ==========
 try:
     league_res = requests.get(
-        f"{base_url}/leagues/271",
+        f"{base_url}/leagues/{LEAGUE_ID}",
         headers=headers,
         params={**params, "include": "currentSeason;seasons"},
         timeout=30,
@@ -260,6 +265,7 @@ try:
         reverse=True,
     )
     season_options = {s["name"]: s["id"] for s in season_records}
+    season_meta = {s["id"]: s for s in season_records}
     season_names = list(season_options)
     default_season_name = next(
         (s["name"] for s in season_records if s["id"] == default_season_id),
@@ -272,6 +278,7 @@ try:
     )
     season_id = season_options[selected_season_name]
     season_name = selected_season_name
+    season_info = season_meta.get(season_id, {})
 
     teams_res = requests.get(
         f"{base_url}/teams/seasons/{season_id}",
@@ -291,6 +298,7 @@ try:
     team_options = {
         t.get("name", "Unknown"): t.get("id") for t in teams if t.get("id")
     }
+    team_id_to_name = {v: k for k, v in team_options.items()}
     selected_team_name = st.selectbox(TEXT["team_select"], sorted(team_options))
     selected_team_id = team_options[selected_team_name]
 
@@ -400,379 +408,440 @@ except Exception as e:
 
 
 # ============================================================
-# Percentile Prototype（少数Fixture・計算検証のみ）
-# Minutes分母 = type_id 119
+# Fixture Season Aggregate（Phase 2）
+# キャッシュ付き・既存レーダーは非接触
 # ============================================================
 st.divider()
-st.subheader("Percentile Prototype（一時）")
+st.subheader("Fixture Season Aggregate（Phase 2）")
 st.caption(
-    "少数Fixtureの合算で、ポジション別指標とパーセンタイル計算を検証します。"
-    "サンプルが少ないため評価用途には使いません。"
+    "終了済み Superliga 全Fixture → キャッシュ → 選手シーズン合算。"
+    "既存レーダーは変更していません。"
 )
 
-# ポジション別指標定義
-# kind: per90 | ratio | lower_better_per90
-POSITION_METRICS = {
-    "GK": [
-        {"key": "saves_p90", "label": "Saves/90", "tid": 57, "kind": "per90"},
-        {"key": "saves_box_p90", "label": "Saves in box/90", "tid": 104, "kind": "per90"},
-        {"key": "conceded_p90", "label": "Goals conc./90", "tid": 88, "kind": "lower_better_per90"},
-        {"key": "pass_acc", "label": "Pass Acc %", "tid": None, "kind": "ratio", "num": 116, "den": 80},
-        {"key": "acc_passes_p90", "label": "Acc. Passes/90", "tid": 116, "kind": "per90"},
-        {"key": "long_balls_p90", "label": "Long Balls/90", "tid": 122, "kind": "per90"},
-        {"key": "recovery_p90", "label": "Ball Recovery/90", "tid": 27271, "kind": "per90"},
-    ],
-    "DEF": [
-        {"key": "tackles_p90", "label": "Tackles/90", "tid": 78, "kind": "per90"},
-        {"key": "intercepts_p90", "label": "Intercepts/90", "tid": 100, "kind": "per90"},
-        {"key": "clearances_p90", "label": "Clearances/90", "tid": 101, "kind": "per90"},
-        {"key": "aerials_p90", "label": "Aerials/90", "tid": 107, "kind": "per90"},
-        {"key": "pass_acc", "label": "Pass Acc %", "tid": None, "kind": "ratio", "num": 116, "den": 80},
-        {"key": "acc_passes_p90", "label": "Acc. Passes/90", "tid": 116, "kind": "per90"},
-        {"key": "recovery_p90", "label": "Ball Recovery/90", "tid": 27271, "kind": "per90"},
-    ],
-    "MID": [
-        {"key": "passes_p90", "label": "Passes/90", "tid": 80, "kind": "per90"},
-        {"key": "pass_acc", "label": "Pass Acc %", "tid": None, "kind": "ratio", "num": 116, "den": 80},
-        {"key": "key_passes_p90", "label": "Key Passes/90", "tid": 117, "kind": "per90"},
-        {"key": "assists_p90", "label": "Assists/90", "tid": 79, "kind": "per90"},
-        {"key": "tackles_p90", "label": "Tackles/90", "tid": 78, "kind": "per90"},
-        {"key": "intercepts_p90", "label": "Intercepts/90", "tid": 100, "kind": "per90"},
-        {"key": "succ_dribbles_p90", "label": "Succ. Dribbles/90", "tid": 109, "kind": "per90"},
-        {"key": "recovery_p90", "label": "Ball Recovery/90", "tid": 27271, "kind": "per90"},
-    ],
-    "FWD": [
-        {"key": "goals_p90", "label": "Goals/90", "tid": 52, "kind": "per90"},
-        {"key": "assists_p90", "label": "Assists/90", "tid": 79, "kind": "per90"},
-        {"key": "shots_p90", "label": "Shots/90", "tid": 42, "kind": "per90"},
-        {"key": "sot_p90", "label": "SOT/90", "tid": 86, "kind": "per90"},
-        {"key": "key_passes_p90", "label": "Key Passes/90", "tid": 117, "kind": "per90"},
-        {"key": "dribble_att_p90", "label": "Dribble Att/90", "tid": 108, "kind": "per90"},
-        {"key": "succ_dribbles_p90", "label": "Succ. Dribbles/90", "tid": 109, "kind": "per90"},
-        {"key": "aerials_p90", "label": "Aerials/90", "tid": 107, "kind": "per90"},
-    ],
-}
 
-_proto_token = os.getenv("SPORTMONKS_TOKEN")
-if _proto_token:
-    _base = "https://api.sportmonks.com/v3/football"
-    _headers = {"Authorization": _proto_token}
-    _params = {"api_token": _proto_token}
-
-    def _deep_num(obj):
-        if obj is None or isinstance(obj, bool):
-            return None
-        if isinstance(obj, (int, float)):
-            return float(obj)
-        if isinstance(obj, str):
-            try:
-                return float(obj)
-            except ValueError:
-                return None
-        if isinstance(obj, dict):
-            for k in ("total", "minutes", "value", "average", "count", "sum", "percentage"):
-                if k in obj:
-                    n = _deep_num(obj[k])
-                    if n is not None:
-                        return n
-            for v in obj.values():
-                n = _deep_num(v)
-                if n is not None:
-                    return n
-        if isinstance(obj, (list, tuple)):
-            for x in obj:
-                n = _deep_num(x)
-                if n is not None:
-                    return n
+def _deep_num(obj):
+    if obj is None or isinstance(obj, bool):
         return None
-
-    def _extract_stat(detail):
-        if not isinstance(detail, dict):
-            return None
-        for key in ("data", "value", "values"):
-            if key in detail:
-                n = _deep_num(detail[key])
-                if n is not None:
-                    return n
-        return None
-
-    def percentile_rank(values, target, higher_is_better=True):
-        """平均ランク方式。同値でも安定。0〜100。"""
-        n = len(values)
-        if n <= 1:
-            return 50.0
-        if higher_is_better:
-            below = sum(1 for v in values if v < target)
-            equal = sum(1 for v in values if v == target)
-        else:
-            below = sum(1 for v in values if v > target)
-            equal = sum(1 for v in values if v == target)
-        # 平均ランク: below + (equal-1)/2
-        rank = below + (equal - 1) / 2.0
-        return round(100.0 * rank / (n - 1), 1) if n > 1 else 50.0
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        start_d = st.text_input("開始日", value="2026-07-20", key="pp_start")
-    with c2:
-        end_d = st.text_input("終了日", value="2026-08-20", key="pp_end")
-    with c3:
-        max_fx = st.number_input("最大試合数", min_value=2, max_value=5, value=4, key="pp_max")
-
-    focus_team = st.text_input("優先チーム", value="AGF", key="pp_team")
-    min_minutes = st.selectbox(
-        "最低出場分（将来用・今回は0推奨）",
-        options=[0, 300, 600, 900],
-        index=0,
-        key="pp_minmin",
-    )
-
-    if st.button("Percentile Prototype を実行", key="pp_run"):
+    if isinstance(obj, (int, float)):
+        return float(obj)
+    if isinstance(obj, str):
         try:
-            between_res = requests.get(
-                f"{_base}/fixtures/between/{start_d}/{end_d}",
-                headers=_headers,
-                params={
-                    **_params,
-                    "filters": "fixtureLeagues:271",
-                    "include": "participants",
-                },
-                timeout=40,
+            return float(obj)
+        except ValueError:
+            return None
+    if isinstance(obj, dict):
+        for k in ("total", "minutes", "value", "average", "count", "sum", "percentage"):
+            if k in obj:
+                n = _deep_num(obj[k])
+                if n is not None:
+                    return n
+        for v in obj.values():
+            n = _deep_num(v)
+            if n is not None:
+                return n
+    if isinstance(obj, (list, tuple)):
+        for x in obj:
+            n = _deep_num(x)
+            if n is not None:
+                return n
+    return None
+
+
+def _extract_stat(detail):
+    if not isinstance(detail, dict):
+        return None
+    for key in ("data", "value", "values"):
+        if key in detail:
+            n = _deep_num(detail[key])
+            if n is not None:
+                return n
+    return None
+
+
+def _cache_dir(sid):
+    d = CACHE_ROOT / f"season_{sid}"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _load_json(path):
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+    return None
+
+
+def _save_json(path, obj):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(obj, ensure_ascii=False), encoding="utf-8")
+
+
+def _is_finished_fixture(fx):
+    """終了試合判定（延長なしのリーグ戦想定）"""
+    state = fx.get("state") or {}
+    state_id = fx.get("state_id") or state.get("id")
+    # Sportmonks: 5=FT が多い。名称でも判定
+    name = (state.get("short_name") or state.get("name") or state.get("developer_name") or "").upper()
+    if state_id in (5, 7, 8):  # FT / AET / FT_PEN など
+        return True
+    if name in ("FT", "FULL TIME", "FINISHED", "AET", "FT_PEN"):
+        return True
+    # result_info や scores がある場合も終了扱い
+    if fx.get("result_info"):
+        return True
+    scores = fx.get("scores") or []
+    if scores:
+        return True
+    return False
+
+
+def fetch_season_fixtures(sid, season_meta_row, force_refresh=False):
+    """シーズンのFixture一覧（ページネーション対応）+ キャッシュ"""
+    cdir = _cache_dir(sid)
+    list_path = cdir / "fixtures_list.json"
+    if not force_refresh:
+        cached = _load_json(list_path)
+        if cached and cached.get("fixtures"):
+            return cached
+
+    start = (season_meta_row.get("starting_at") or "2026-07-01")[:10]
+    end = (season_meta_row.get("ending_at") or "2027-06-30")[:10]
+    # 進行中シーズンは今日まで
+    today = date.today().isoformat()
+    if end > today:
+        end = today
+
+    all_fx = []
+    page = 1
+    errors = 0
+    while True:
+        res = requests.get(
+            f"{base_url}/fixtures/between/{start}/{end}",
+            headers=headers,
+            params={
+                **params,
+                "filters": f"fixtureLeagues:{LEAGUE_ID}",
+                "include": "state;participants;scores",
+                "page": page,
+            },
+            timeout=40,
+        )
+        if res.status_code != 200:
+            errors += 1
+            break
+        body = res.json() or {}
+        data = body.get("data") or []
+        all_fx.extend(data)
+        pag = body.get("pagination") or {}
+        if not pag.get("has_more"):
+            break
+        page += 1
+        if page > 30:
+            break
+        time.sleep(0.15)
+
+    finished = [fx for fx in all_fx if _is_finished_fixture(fx)]
+    payload = {
+        "season_id": sid,
+        "start": start,
+        "end": end,
+        "total_fetched": len(all_fx),
+        "finished_count": len(finished),
+        "list_errors": errors,
+        "fixtures": [
+            {
+                "id": fx.get("id"),
+                "name": fx.get("name"),
+                "starting_at": fx.get("starting_at"),
+                "state_id": fx.get("state_id"),
+            }
+            for fx in finished
+            if fx.get("id")
+        ],
+    }
+    _save_json(list_path, payload)
+    return payload
+
+
+def fetch_fixture_details(sid, fixture_id, force_refresh=False):
+    """1試合の lineups.details を取得（ファイルキャッシュ）"""
+    cdir = _cache_dir(sid)
+    path = cdir / f"fixture_{fixture_id}.json"
+    if not force_refresh:
+        cached = _load_json(path)
+        if cached is not None:
+            return cached, False, None  # data, from_api, error
+
+    res = requests.get(
+        f"{base_url}/fixtures/{fixture_id}",
+        headers=headers,
+        params={**params, "include": "lineups.details.type;participants"},
+        timeout=45,
+    )
+    if res.status_code != 200:
+        return None, True, f"HTTP {res.status_code}"
+    data = (res.json() or {}).get("data")
+    _save_json(path, data)
+    time.sleep(0.12)
+    return data, True, None
+
+
+def aggregate_from_fixtures(fixture_payloads):
+    """fixtures の lineups から PlayerSeasonAggregate を作る"""
+    aggs = {}
+    for fdata in fixture_payloads:
+        if not fdata:
+            continue
+        lineups = fdata.get("lineups") or []
+        for lu in lineups:
+            pid = lu.get("player_id")
+            if not pid:
+                continue
+            pname = (
+                (lu.get("player") or {}).get("name")
+                or lu.get("player_name")
+                or f"id:{pid}"
             )
-            if between_res.status_code != 200:
-                st.error(f"between 失敗: {between_res.status_code}")
+            team_id = lu.get("team_id")
+            pos_id = lu.get("position_id") or (
+                (lu.get("player") or {}).get("position_id")
+            )
+            details = lu.get("details") or []
+
+            if pid not in aggs:
+                aggs[pid] = {
+                    "player_id": pid,
+                    "player_name": pname,
+                    "team_id": team_id,
+                    "position_id": pos_id,
+                    "minutes": 0.0,
+                    "raw": {},
+                    "fixture_appearances": 0,
+                }
             else:
-                all_fx = between_res.json().get("data") or []
-                focus = (focus_team or "").strip().lower()
+                if pname and str(aggs[pid]["player_name"]).startswith("id:"):
+                    aggs[pid]["player_name"] = pname
+                if pos_id and not aggs[pid]["position_id"]:
+                    aggs[pid]["position_id"] = pos_id
+                # 複数チームは最後の team_id を保持（簡易）
+                if team_id:
+                    aggs[pid]["team_id"] = team_id
 
-                def involves(fx):
-                    name = (fx.get("name") or "").lower()
-                    if focus and focus in name:
-                        return True
-                    for p in fx.get("participants") or []:
-                        if focus and focus in (p.get("name") or "").lower():
-                            return True
-                    return False
+            played = False
+            for d in details:
+                tid = d.get("type_id")
+                if tid is None:
+                    continue
+                parsed = _extract_stat(d)
+                if parsed is None:
+                    continue
+                if tid == MINUTES_TYPE_ID:
+                    aggs[pid]["minutes"] += parsed
+                    if parsed > 0:
+                        played = True
+                else:
+                    aggs[pid]["raw"][tid] = aggs[pid]["raw"].get(tid, 0.0) + parsed
+            if played:
+                aggs[pid]["fixture_appearances"] += 1
+    return aggs
 
-                focused = [fx for fx in all_fx if involves(fx)]
-                focused.sort(key=lambda x: x.get("starting_at") or "")
-                selected = focused[: int(max_fx)]
-                if len(selected) < int(max_fx):
-                    rest = [fx for fx in all_fx if fx not in selected]
-                    rest.sort(key=lambda x: x.get("starting_at") or "")
-                    selected += rest[: int(max_fx) - len(selected)]
 
-                st.write(
-                    f"使用Fixture: {len(selected)} "
-                    f"（『{focus_team}』関連 {len(focused)} / 期間内 {len(all_fx)}）"
-                )
-                st.dataframe(
-                    [
-                        {
-                            "fixture_id": fx.get("id"),
-                            "match": fx.get("name"),
-                            "date": (fx.get("starting_at") or "")[:10],
-                        }
-                        for fx in selected
-                    ],
-                    use_container_width=True,
-                    hide_index=True,
-                )
+def percentile_rank(values, target, higher_is_better=True):
+    n = len(values)
+    if n <= 1:
+        return 50.0
+    if higher_is_better:
+        below = sum(1 for v in values if v < target)
+        equal = sum(1 for v in values if v == target)
+    else:
+        below = sum(1 for v in values if v > target)
+        equal = sum(1 for v in values if v == target)
+    rank = below + (equal - 1) / 2.0
+    return round(100.0 * rank / (n - 1), 1)
 
-                aggs = {}
-                for fx in selected:
-                    fid = fx.get("id")
-                    fr = requests.get(
-                        f"{_base}/fixtures/{fid}",
-                        headers=_headers,
-                        params={**_params, "include": "lineups.details.type"},
-                        timeout=40,
-                    )
-                    if fr.status_code != 200:
-                        st.warning(f"{fid} 失敗: {fr.status_code}")
-                        continue
-                    lineups = ((fr.json() or {}).get("data") or {}).get("lineups") or []
-                    st.caption(f"fixture {fid}: lineups={len(lineups)}")
 
-                    for lu in lineups:
-                        pid = lu.get("player_id")
-                        if not pid:
-                            continue
-                        pname = (
-                            (lu.get("player") or {}).get("name")
-                            or lu.get("player_name")
-                            or f"id:{pid}"
-                        )
-                        pos_id = lu.get("position_id") or (
-                            (lu.get("player") or {}).get("position_id")
-                        )
-                        details = lu.get("details") or []
+# UI
+force = st.checkbox("キャッシュを無視して再取得（API消費大）", value=False)
+min_min = st.selectbox("最低出場分（表示用）", [0, 300, 600, 900], index=3)
+run_agg = st.button("シーズンAggregateを構築 / 更新", key="agg_run")
 
-                        if pid not in aggs:
-                            aggs[pid] = {
-                                "player_id": pid,
-                                "player_name": pname,
-                                "position_id": pos_id,
-                                "minutes": 0.0,
-                                "raw": {},
-                            }
-                        else:
-                            if pname and str(aggs[pid]["player_name"]).startswith("id:"):
-                                aggs[pid]["player_name"] = pname
-                            if pos_id and not aggs[pid]["position_id"]:
-                                aggs[pid]["position_id"] = pos_id
+if run_agg:
+    try:
+        with st.spinner("Fixture一覧を取得中..."):
+            flist = fetch_season_fixtures(season_id, season_info, force_refresh=force)
 
-                        for d in details:
-                            tid = d.get("type_id")
-                            if tid is None:
-                                continue
-                            parsed = _extract_stat(d)
-                            if parsed is None:
-                                continue
-                            if tid == MINUTES_TYPE_ID:
-                                aggs[pid]["minutes"] += parsed
-                            else:
-                                aggs[pid]["raw"][tid] = (
-                                    aggs[pid]["raw"].get(tid, 0.0) + parsed
-                                )
+        fx_ids = [f["id"] for f in flist.get("fixtures", [])]
+        st.markdown("#### A. Fixture取得")
+        st.write(
+            {
+                "season_id": season_id,
+                "season": season_name,
+                "期間": f"{flist.get('start')} ~ {flist.get('end')}",
+                "一覧で取得した総数": flist.get("total_fetched"),
+                "終了済みと判定": flist.get("finished_count"),
+                "集計対象 fixture_id 数": len(fx_ids),
+                "一覧APIエラー": flist.get("list_errors"),
+                "force_refresh": force,
+            }
+        )
 
-                # 指標計算
-                players_calc = []
-                for a in aggs.values():
-                    mins = a["minutes"]
-                    if mins < float(min_minutes):
-                        continue
-                    if mins <= 0:
-                        continue
-                    pos = POSITION_MAP.get(a["position_id"])
-                    if pos not in POSITION_METRICS:
-                        continue
-                    raw = a["raw"]
-                    metrics = {}
-                    for m in POSITION_METRICS[pos]:
-                        if m["kind"] in ("per90", "lower_better_per90"):
-                            metrics[m["key"]] = round(
-                                raw.get(m["tid"], 0.0) * 90.0 / mins, 3
-                            )
-                        elif m["kind"] == "ratio":
-                            den = raw.get(m["den"], 0.0)
-                            num = raw.get(m["num"], 0.0)
-                            metrics[m["key"]] = (
-                                round(num / den * 100.0, 2) if den > 0 else None
-                            )
-                    players_calc.append(
-                        {
-                            "player_id": a["player_id"],
-                            "Player": a["player_name"],
-                            "Pos": pos,
-                            "position_id": a["position_id"],
-                            "Minutes": int(round(mins)),
-                            "metrics": metrics,
-                        }
-                    )
+        progress = st.progress(0.0)
+        status = st.empty()
+        loaded = []
+        api_hits = 0
+        cache_hits = 0
+        errors = []
 
-                # ① ポジション人数
-                st.markdown("#### ① Positionごとの選手数（Minutes>0）")
-                counts = {p: 0 for p in ("GK", "DEF", "MID", "FWD")}
-                for p in players_calc:
-                    counts[p["Pos"]] = counts.get(p["Pos"], 0) + 1
-                st.write(counts)
+        for i, fid in enumerate(fx_ids):
+            status.caption(f"Fixture {i+1}/{len(fx_ids)} id={fid}")
+            data, from_api, err = fetch_fixture_details(
+                season_id, fid, force_refresh=force
+            )
+            if err:
+                errors.append({"fixture_id": fid, "error": err})
+            elif data is not None:
+                loaded.append(data)
+                if from_api:
+                    api_hits += 1
+                else:
+                    cache_hits += 1
+            progress.progress((i + 1) / max(len(fx_ids), 1))
 
-                # ポジション内パーセンタイル
-                for pos in ("GK", "DEF", "MID", "FWD"):
-                    group = [p for p in players_calc if p["Pos"] == pos]
-                    if not group:
-                        continue
-                    metric_defs = POSITION_METRICS[pos]
+        status.caption("集計中...")
+        aggs = aggregate_from_fixtures(loaded)
 
-                    # 各指標の値リスト
-                    for m in metric_defs:
-                        vals = [
-                            g["metrics"][m["key"]]
-                            for g in group
-                            if g["metrics"].get(m["key"]) is not None
-                        ]
-                        higher = m["kind"] != "lower_better_per90"
-                        for g in group:
-                            v = g["metrics"].get(m["key"])
-                            if v is None:
-                                g.setdefault("pct", {})[m["key"]] = None
-                            else:
-                                g.setdefault("pct", {})[m["key"]] = percentile_rank(
-                                    vals, v, higher_is_better=higher
-                                )
+        # 表データ
+        rows = []
+        for a in aggs.values():
+            mins = a["minutes"]
+            raw = a["raw"]
+            pos = POSITION_MAP.get(a["position_id"], a["position_id"])
 
-                    st.markdown(f"#### ② {pos} — Per90 / %（{len(group)}人）")
-                    raw_table = []
-                    for g in sorted(group, key=lambda x: x["Minutes"], reverse=True):
-                        row = {
-                            "Player": g["Player"],
-                            "Minutes": g["Minutes"],
-                        }
-                        for m in metric_defs:
-                            row[m["label"]] = g["metrics"].get(m["key"])
-                        raw_table.append(row)
-                    st.dataframe(raw_table, use_container_width=True, hide_index=True)
+            def p90(tid):
+                if mins <= 0:
+                    return None
+                return round(raw.get(tid, 0.0) * 90.0 / mins, 2)
 
-                    st.markdown(f"#### ③ {pos} — Percentile 0–100")
-                    pct_table = []
-                    for g in sorted(group, key=lambda x: x["Minutes"], reverse=True):
-                        row = {
-                            "Player": g["Player"],
-                            "Pos": pos,
-                            "Minutes": g["Minutes"],
-                        }
-                        for m in metric_defs:
-                            row[m["label"]] = g.get("pct", {}).get(m["key"])
-                        pct_table.append(row)
-                    st.dataframe(pct_table, use_container_width=True, hide_index=True)
+            passes = raw.get(80, 0.0)
+            acc = raw.get(116, 0.0)
+            pass_pct = round(acc / passes * 100.0, 1) if passes > 0 else None
+            rows.append(
+                {
+                    "Player": a["player_name"],
+                    "player_id": a["player_id"],
+                    "Team": team_id_to_name.get(a["team_id"], a["team_id"]),
+                    "Pos": pos,
+                    "position_id": a["position_id"],
+                    "Minutes": int(round(mins)),
+                    "Apps": a["fixture_appearances"],
+                    "Goals/90": p90(52),
+                    "Assists/90": p90(79),
+                    "Shots/90": p90(42),
+                    "Passes/90": p90(80),
+                    "Pass Acc %": pass_pct,
+                    "Key Passes/90": p90(117),
+                    "Tackles/90": p90(78),
+                    "Intercepts/90": p90(100),
+                    "Clearances/90": p90(101),
+                    "Aerials/90": p90(107),
+                    "Succ. Dribbles/90": p90(109),
+                }
+            )
 
-                # ④ 1名サンプル詳細
-                st.markdown("#### ④ サンプル: Raw → 順位 → Percentile")
-                if players_calc:
-                    # 分が多い選手を1人
-                    sample = max(players_calc, key=lambda x: x["Minutes"])
-                    pos = sample["Pos"]
-                    group = [p for p in players_calc if p["Pos"] == pos]
-                    st.markdown(
-                        f"**{sample['Player']}**（{pos}, {sample['Minutes']}分, "
-                        f"同ポジション {len(group)}人中）"
-                    )
-                    detail_rows = []
-                    for m in POSITION_METRICS[pos]:
-                        v = sample["metrics"].get(m["key"])
-                        vals = [
-                            g["metrics"][m["key"]]
-                            for g in group
-                            if g["metrics"].get(m["key"]) is not None
-                        ]
-                        higher = m["kind"] != "lower_better_per90"
-                        if v is None or not vals:
-                            rank_disp = None
-                            pct = None
-                        else:
-                            if higher:
-                                better = sum(1 for x in vals if x > v)
-                                rank_disp = better + 1  # 1位が最高
-                            else:
-                                better = sum(1 for x in vals if x < v)
-                                rank_disp = better + 1
-                            pct = sample.get("pct", {}).get(m["key"])
-                        detail_rows.append(
-                            {
-                                "指標": m["label"],
-                                "Raw": v,
-                                "向き": "低いほど良" if not higher else "高いほど良",
-                                "同POS人数": len(vals),
-                                "順位(1=最良)": rank_disp,
-                                "Percentile": pct,
-                            }
-                        )
-                    st.dataframe(detail_rows, use_container_width=True, hide_index=True)
-                    st.caption(
-                        "Goals conc./90 のみ「低いほど Percentile が高い」。"
-                        "少数サンプルのため数値は検証用です。"
-                    )
+        rows.sort(key=lambda r: r["Minutes"], reverse=True)
+        filtered = [r for r in rows if r["Minutes"] >= min_min]
 
-        except Exception as e:
-            st.error(f"Prototype エラー: {e}")
+        # Percentile（同一Pos、デフォルト表示は min_min 以上）
+        for pos in ("GK", "DEF", "MID", "FWD"):
+            group = [r for r in filtered if r["Pos"] == pos]
+            metric_keys = [
+                "Goals/90",
+                "Assists/90",
+                "Passes/90",
+                "Pass Acc %",
+                "Key Passes/90",
+                "Tackles/90",
+                "Intercepts/90",
+                "Clearances/90",
+                "Aerials/90",
+            ]
+            for mk in metric_keys:
+                vals = [g[mk] for g in group if g.get(mk) is not None]
+                for g in group:
+                    v = g.get(mk)
+                    if v is None or not vals:
+                        g[f"pct_{mk}"] = None
+                    else:
+                        g[f"pct_{mk}"] = percentile_rank(vals, v, True)
+
+        st.markdown("#### B. 集計")
+        with_mins = [r for r in rows if r["Minutes"] > 0]
+        counts = {p: 0 for p in ("GK", "DEF", "MID", "FWD")}
+        for r in with_mins:
+            if r["Pos"] in counts:
+                counts[r["Pos"]] += 1
+        st.write(
+            {
+                "実際に読み込めたFixture": len(loaded),
+                "API新規取得": api_hits,
+                "キャッシュヒット": cache_hits,
+                "Fixtureエラー数": len(errors),
+                "集計選手数": len(rows),
+                "Minutes>0": len(with_mins),
+                f"Minutes>={min_min}": len(filtered),
+                "ポジション別(Minutes>0)": counts,
+            }
+        )
+        if errors:
+            st.warning("エラーFixture")
+            st.dataframe(errors, use_container_width=True, hide_index=True)
+
+        st.markdown("#### 選手集計表（Minutes降順）")
+        st.dataframe(filtered[:80], use_container_width=True, hide_index=True)
+
+        # C. サンプル
+        st.markdown("#### C. サンプル検証（各ポジション1名）")
+        for pos in ("GK", "DEF", "MID", "FWD"):
+            cand = [r for r in filtered if r["Pos"] == pos]
+            if not cand:
+                st.caption(f"{pos}: 該当なし")
+                continue
+            s = cand[0]
+            st.markdown(
+                f"**{pos}: {s['Player']}**（{s['Team']}, {s['Minutes']}分）"
+            )
+            st.write(
+                {
+                    "Minutes": s["Minutes"],
+                    "Passes/90": s["Passes/90"],
+                    "Pass Acc %": s["Pass Acc %"],
+                    "Tackles/90": s["Tackles/90"],
+                    "Goals/90": s["Goals/90"],
+                    "pct_Passes/90": s.get("pct_Passes/90"),
+                    "pct_Tackles/90": s.get("pct_Tackles/90"),
+                }
+            )
+
+        # 集計結果もキャッシュ
+        agg_path = _cache_dir(season_id) / "player_season_aggregate.json"
+        _save_json(
+            agg_path,
+            {
+                "season_id": season_id,
+                "built_at": datetime.utcnow().isoformat() + "Z",
+                "players": rows,
+            },
+        )
+        st.success(
+            f"集計完了。キャッシュ: cache/superliga/season_{season_id}/ "
+            f"（fixtures_list + fixture_*.json + player_season_aggregate.json）"
+        )
+        st.caption(
+            "次回はキャッシュから読むため、APIはほぼ増えません。"
+            "再取得したいときだけ「キャッシュを無視」にチェック。"
+        )
+
+    except Exception as e:
+        st.error(f"Aggregate エラー: {e}")
