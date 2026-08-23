@@ -24,13 +24,13 @@ args = "Streamlit app"
 name = "Streamlit app"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "streamlit run main.py --server.port 8000 --server.headless true --browser.gatherUsageStats false"
-waitForPort = 8000
-
 [workflows.workflow.metadata]
 outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "streamlit run main.py --server.port 8000 --server.address 0.0.0.0 --server.headless true"
+waitForPort = 8000
 
 [agent]
 stack = "PNPM_WORKSPACE"
