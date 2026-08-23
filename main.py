@@ -23,33 +23,21 @@ TEXT = {
     "description": "Superliga teams and players"
     if is_english
     else "Superligaのチームと選手",
-    "token_missing": "Token not found"
-    if is_english
-    else "トークンが見つかりません",
-    "connected": "Connected to Sportmonks"
-    if is_english
-    else "Sportmonksに接続できました",
+    "token_missing": "Token not found" if is_english else "トークンが見つかりません",
+    "connected": "Connected to Sportmonks" if is_english else "Sportmonksに接続できました",
     "season": "Current season" if is_english else "現在のシーズン",
     "season_id": "Season ID" if is_english else "シーズンID",
     "season_select": "Select a season" if is_english else "シーズンを選択してください",
     "team_select": "Select a team" if is_english else "チームを選択してください",
-    "player_select": "Select a player"
-    if is_english
-    else "選手を選択してください",
-    "minute_filter": "Filter by playing time"
-    if is_english
-    else "出場時間で絞り込む",
+    "player_select": "Select a player" if is_english else "選手を選択してください",
+    "minute_filter": "Filter by playing time" if is_english else "出場時間で絞り込む",
     "no_team": "No teams found for this season"
     if is_english
     else "このシーズンのチームが見つかりません",
-    "team_list": "Team players" if is_english else "の選手一覧",
-    "target_players": "Eligible players"
-    if is_english
-    else "対象選手",
+    "team_list": " players" if is_english else "の選手一覧",
+    "target_players": "Eligible players" if is_english else "対象選手",
     "all_players": "all" if is_english else "全",
-    "player_chart": "Player radar chart"
-    if is_english
-    else "のレーダーチャート",
+    "player_chart": " radar chart" if is_english else "のレーダーチャート",
     "stats": "Stats" if is_english else "指標",
     "per90_note": "Values are stats per 90 minutes."
     if is_english
@@ -57,19 +45,23 @@ TEXT = {
     "player_name": "Player" if is_english else "選手名",
     "minutes": "Playing time" if is_english else "出場時間",
     "download": "Download image" if is_english else "画像をダウンロード",
-    "no_players": "No player data found"
-    if is_english
-    else "選手データがありません",
+    "no_players": "No player data found" if is_english else "選手データがありません",
     "no_stats": "No stats available for this player"
     if is_english
     else "この選手のスタッツがありません",
 }
 
+# 紺×白
+NAVY = "#0B1F3A"
+NAVY_SOFT = "rgba(11, 31, 58, 0.28)"
+GRID = "#D6DEE8"
+AXIS = "#8FA1B5"
+TEXT_COLOR = "#0B1F3A"
+
 st.title(TEXT["title"])
 st.write(TEXT["description"])
 
 token = os.getenv("SPORTMONKS_TOKEN")
-
 if not token:
     st.error(TEXT["token_missing"])
     st.stop()
@@ -80,7 +72,7 @@ base_url = "https://api.sportmonks.com/v3/football"
 default_season_id = 27897
 season_id = default_season_id
 
-# Sportmonksの統計項目ID。APIから項目名が返らないため、対応できるものだけ日本語化する。
+# type_id → 表示名
 STATISTIC_NAMES = {
     52: "ゴール",
     79: "アシスト",
@@ -103,16 +95,10 @@ STATISTIC_NAMES_EN = {
     321: "Aerials Won",
     322: "Successful Dribbles",
 }
-RADAR_STATISTIC_IDS = {
-    52,
-    79,
-    194,
-    214,
-    215,
-    216,
-    321,
-    322,
-}
+
+# レーダーに使う指標（表示順を固定）
+RADAR_ORDER = [52, 79, 194, 214, 215, 216, 321, 322]
+RADAR_STATISTIC_IDS = set(RADAR_ORDER)
 
 
 def get_total_value(detail):
@@ -147,7 +133,6 @@ def get_logo_data_uri():
 
 
 try:
-    # リーグID 271（Superliga）のシーズン一覧と現在シーズンを取得
     league_res = requests.get(
         f"{base_url}/leagues/271",
         headers=headers,
@@ -181,10 +166,7 @@ try:
         ),
         reverse=True,
     )
-    season_options = {
-        season["name"]: season["id"]
-        for season in season_records
-    }
+    season_options = {season["name"]: season["id"] for season in season_records}
     season_names = list(season_options)
     default_season_name = next(
         (
@@ -202,7 +184,6 @@ try:
     season_id = season_options[selected_season_name]
     season_name = selected_season_name
 
-    # 選択したシーズンに所属するチーム一覧を取得
     teams_res = requests.get(
         f"{base_url}/teams/seasons/{season_id}",
         headers=headers,
@@ -234,13 +215,13 @@ try:
         for team in teams
         if team.get("id")
     }
+    # チーム名アルファベット順
     selected_team_name = st.selectbox(
         TEXT["team_select"],
-        list(team_options),
+        sorted(team_options),
     )
     selected_team_id = team_options[selected_team_name]
 
-    # 選択したチームのシーズン別選手一覧とスタッツを取得
     squad_res = requests.get(
         f"{base_url}/squads/seasons/{season_id}/teams/{selected_team_id}",
         headers=headers,
@@ -268,9 +249,12 @@ try:
         TEXT["minute_filter"],
         options=[900, 600, 300, 0],
         format_func=lambda value: (
-            f"{value}+ minutes" if is_english and value
-            else "Any playing time" if is_english
-            else f"{value}分以上" if value
+            f"{value}+ minutes"
+            if is_english and value
+            else "Any playing time"
+            if is_english
+            else f"{value}分以上"
+            if value
             else "指定なし"
         ),
     )
@@ -288,25 +272,25 @@ try:
         )
     else:
         st.caption(f"対象選手: {len(players)}人 / 全{len(all_players)}人")
+
     if players:
         player_options = {
             player["name"]: player["id"]
             for player in players
             if player.get("id")
         }
+        # 選手名アルファベット順
         selected_player_name = st.selectbox(
             TEXT["player_select"],
-            list(player_options),
+            sorted(player_options),
         )
         selected_player = next(
             player
             for player in players
             if player.get("id") == player_options[selected_player_name]
         )
-        season_statistics = [
-            statistic
-            for statistic in get_season_statistics(selected_player)
-        ]
+
+        season_statistics = get_season_statistics(selected_player)
         statistic_details = [
             detail
             for statistic in season_statistics
@@ -314,53 +298,55 @@ try:
             if detail.get("value") is not None
         ]
 
-        radar_values = {}
-        radar_names = STATISTIC_NAMES_EN if is_english else STATISTIC_NAMES
+        raw_by_id = {}
         for detail in statistic_details:
             type_id = detail.get("type_id")
             value = get_total_value(detail)
-            if (
-                type_id in RADAR_STATISTIC_IDS
-                and isinstance(value, (int, float))
-            ):
-                radar_values[radar_names[type_id]] = value
+            if type_id in RADAR_STATISTIC_IDS and isinstance(value, (int, float)):
+                raw_by_id[type_id] = value
+
+        radar_names = STATISTIC_NAMES_EN if is_english else STATISTIC_NAMES
+        # 固定順でラベルと値を作る（ある指標だけ）
+        ordered_ids = [i for i in RADAR_ORDER if i in raw_by_id]
+        labels = [radar_names[i] for i in ordered_ids]
+        raw_values = [raw_by_id[i] for i in ordered_ids]
 
         st.subheader(f"{selected_player_name}{TEXT['player_chart']}")
-        if radar_values:
+        if labels:
             minutes = get_minutes(selected_player)
-            display_values = list(radar_values.values())
             if minutes > 0:
-                display_values = [
-                    round(value * 90 / minutes, 2)
-                    for value in display_values
-                ]
+                display_values = [round(v * 90 / minutes, 2) for v in raw_values]
                 scale_label = "per90"
             else:
+                display_values = raw_values
                 scale_label = (
                     "Raw values (no playing time)"
                     if is_english
                     else "実数値（出場時間なし）"
                 )
 
-            labels = list(radar_values)
             chart_labels = labels + [labels[0]]
             chart_values = display_values + [display_values[0]]
+            max_val = max(display_values) if display_values else 1
+            radial_max = max(max_val * 1.15, 0.5)
+
             figure = go.Figure(
                 go.Scatterpolar(
                     r=chart_values,
                     theta=chart_labels,
                     fill="toself",
-                    fillcolor="rgba(15, 45, 85, 0.22)",
-                    line={"color": "#0f2d55", "width": 3},
-                    marker={"color": "#0f2d55", "size": 7},
+                    fillcolor=NAVY_SOFT,
+                    line={"color": NAVY, "width": 3.5},
+                    marker={"color": NAVY, "size": 8},
+                    mode="lines+markers",
                 )
             )
             figure.update_layout(
-                height=680,
-                margin={"l": 40, "r": 40, "t": 45, "b": 105},
+                height=720,
+                margin={"l": 50, "r": 50, "t": 60, "b": 110},
                 paper_bgcolor="white",
                 plot_bgcolor="white",
-                font={"color": "#0f2d55", "size": 14},
+                font={"color": TEXT_COLOR, "size": 13, "family": "Arial, sans-serif"},
                 showlegend=False,
                 images=[
                     {
@@ -368,9 +354,9 @@ try:
                         "xref": "paper",
                         "yref": "paper",
                         "x": 0.98,
-                        "y": 0.01,
-                        "sizex": 0.07,
-                        "sizey": 0.07,
+                        "y": 0.02,
+                        "sizex": 0.08,
+                        "sizey": 0.08,
                         "xanchor": "right",
                         "yanchor": "bottom",
                         "sizing": "contain",
@@ -382,33 +368,36 @@ try:
                         "text": "@Dalaprospect",
                         "xref": "paper",
                         "yref": "paper",
-                        "x": 0.89,
-                        "y": 0.045,
+                        "x": 0.88,
+                        "y": 0.05,
                         "xanchor": "right",
                         "yanchor": "middle",
                         "showarrow": False,
-                        "font": {
-                            "color": "#0f2d55",
-                            "size": 12,
-                        },
+                        "font": {"color": NAVY, "size": 13},
                     }
                 ],
                 title={
-                    "text": f"{TEXT['stats']} ({scale_label})",
-                    "font": {"size": 18},
+                    "text": f"{selected_player_name}  |  {TEXT['stats']} ({scale_label})",
+                    "font": {"size": 16, "color": NAVY},
+                    "x": 0.5,
+                    "xanchor": "center",
                 },
                 polar={
                     "bgcolor": "white",
                     "radialaxis": {
                         "visible": True,
-                        "gridcolor": "#d9e2ef",
-                        "linecolor": "#9fb2ca",
-                        "tickfont": {"color": "#48617e"},
+                        "range": [0, radial_max],
+                        "gridcolor": GRID,
+                        "linecolor": AXIS,
+                        "tickfont": {"color": AXIS, "size": 11},
+                        "showline": True,
                     },
                     "angularaxis": {
-                        "gridcolor": "#d9e2ef",
-                        "linecolor": "#9fb2ca",
-                        "tickfont": {"color": "#0f2d55", "size": 14},
+                        "gridcolor": GRID,
+                        "linecolor": AXIS,
+                        "tickfont": {"color": NAVY, "size": 13},
+                        "rotation": 90,
+                        "direction": "clockwise",
                     },
                 },
             )
@@ -422,7 +411,7 @@ try:
                 png_data = figure.to_image(
                     format="png",
                     width=900,
-                    height=1100,
+                    height=1125,
                     scale=2,
                 )
                 st.download_button(
@@ -439,8 +428,7 @@ try:
                 )
             st.write(f"{TEXT['player_name']}: {selected_player_name}")
             st.write(
-                f"{TEXT['minutes']}: "
-                f"{minutes}{' minutes' if is_english else '分'}"
+                f"{TEXT['minutes']}: {minutes}{' minutes' if is_english else '分'}"
             )
         else:
             st.info(TEXT["no_stats"])
@@ -448,6 +436,4 @@ try:
         st.info(TEXT["no_players"])
 
 except Exception as e:
-    st.error(
-        f"Connection error: {e}" if is_english else f"接続エラー: {e}"
-    )
+    st.error(f"Connection error: {e}" if is_english else f"接続エラー: {e}")
