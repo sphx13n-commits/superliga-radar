@@ -1,6 +1,5 @@
 import base64
 import json
-import math
 import os
 import time
 from datetime import date, datetime, timezone
@@ -67,23 +66,7 @@ def fmt_num(x, kind="raw"):
     return s if s else "0"
 
 
-def metric_label(name):
-    """短い指標は1行、長いものだけ2行。"""
-    two_line = {
-        "Key Pass/90": "Key Pass<br>/90",
-        "Succ Drib/90": "Succ Drib<br>/90",
-        "Drib Att/90": "Drib Att<br>/90",
-        "Acc Pass/90": "Acc Pass<br>/90",
-        "Pass Acc %": "Pass Acc<br>%",
-        "Intercepts/90": "Intercepts<br>/90",
-        "Clearances/90": "Clearances<br>/90",
-        "Saves Box/90": "Saves Box<br>/90",
-        "Long Balls/90": "Long Balls<br>/90",
-        "Recovery/90": "Recovery<br>/90",
-    }
-    return two_line.get(name, name)
-
-
+# 読みやすい表記（略しすぎない）
 POSITION_METRICS = {
     "GK": [
         {"key": "saves_p90", "label": "Saves/90", "tid": 57, "kind": "per90"},
@@ -311,11 +294,7 @@ def format_updated_at(iso_str):
 
 
 def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
-    """
-    指標ラベルは円周上に配置し、円に沿って回転。
-    短いものは1行、長いものだけ2行。
-    """
-    # thetaはカテゴリ軸用に元ラベルを使用
+    """水平ラベル。見切れ防止のため余白・幅を確保。"""
     r_poly = values + [values[0]]
     theta = labels + [labels[0]]
     colors_closed = marker_colors + [marker_colors[0]]
@@ -357,14 +336,6 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
         )
     )
 
-    # polar domain（ラベル用の計算にも使う）
-    dx0, dx1 = 0.08, 0.92
-    dy0, dy1 = 0.18, 0.80
-    cx = (dx0 + dx1) / 2
-    cy = (dy0 + dy1) / 2
-    rad_x = (dx1 - dx0) / 2 * 1.12
-    rad_y = (dy1 - dy0) / 2 * 1.12
-
     annotations = []
     title_sizes = [48, 22, 17]
     title_ys = [0.985, 0.935, 0.900]
@@ -384,46 +355,6 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
                     "size": title_sizes[i] if i < len(title_sizes) else 16,
                     "family": "Arial",
                 },
-            }
-        )
-
-    # 円周ラベル（円に沿って回転・外側から読める向き）
-    n = len(labels)
-    for i, lab in enumerate(labels):
-        clock_deg = i * (360.0 / n)  # topから時計回り
-        math_deg = 90.0 - clock_deg  # 数学角（東=0, 反時計）
-        rad = math.radians(math_deg)
-        x = cx + rad_x * math.cos(rad)
-        y = cy + rad_y * math.sin(rad)
-
-        # 接線方向。上下逆なら180°回して読みやすく
-        textangle = math_deg - 90.0
-        while textangle > 180:
-            textangle -= 360
-        while textangle < -180:
-            textangle += 360
-        if textangle > 90 or textangle < -90:
-            textangle += 180
-            if textangle > 180:
-                textangle -= 360
-
-        annotations.append(
-            {
-                "x": x,
-                "y": y,
-                "xref": "paper",
-                "yref": "paper",
-                "text": f"<b>{metric_label(lab)}</b>",
-                "showarrow": False,
-                "textangle": textangle,
-                "font": {
-                    "size": 15,
-                    "color": NAVY,
-                    "family": "Arial",
-                },
-                "xanchor": "center",
-                "yanchor": "middle",
-                "align": "center",
             }
         )
 
@@ -478,15 +409,16 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
 
     fig.update_layout(
         height=1500,
-        width=1100,
-        margin={"l": 70, "r": 70, "t": 160, "b": 170},
+        width=1200,
+        margin={"l": 110, "r": 110, "t": 160, "b": 170},
         paper_bgcolor=WHITE,
         plot_bgcolor=WHITE,
         showlegend=False,
         images=images,
         annotations=annotations,
         polar={
-            "domain": {"x": [dx0, dx1], "y": [dy0, dy1]},
+            # 左右にラベル用スペースを多めに確保
+            "domain": {"x": [0.14, 0.86], "y": [0.18, 0.80]},
             "bgcolor": BG,
             "radialaxis": {
                 "visible": True,
@@ -499,8 +431,11 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes):
             "angularaxis": {
                 "gridcolor": GRID,
                 "linecolor": AXIS,
-                "showticklabels": False,  # 自前の円周ラベルを使う
-                "ticks": "",
+                "tickfont": {
+                    "color": NAVY,
+                    "size": 16,
+                    "family": "Arial",
+                },
                 "rotation": 90,
                 "direction": "clockwise",
             },
@@ -1045,7 +980,7 @@ else:
             footnotes,
         )
         try:
-            png = fig.to_image(format="png", width=1100, height=1500, scale=2)
+            png = fig.to_image(format="png", width=1200, height=1500, scale=2)
             st.image(png, use_container_width=True)
             st.caption(T["band_legend"])
             st.download_button(
