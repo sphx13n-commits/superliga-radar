@@ -42,10 +42,10 @@ TEXT = {
     "team_list": " squad" if is_english else "の選手一覧",
     "target_players": "Shown" if is_english else "対象選手",
     "all_players": "total" if is_english else "全",
-    "per90_note": "Chart values are per 90 minutes (not percentiles)."
+    "per90_note": "Values are per 90 minutes (not percentiles)."
     if is_english
-    else "チャートの数字は90分あたりの回数です（パーセンタイルではありません）。",
-    "save_hint": "Long-press the image below to save it to Photos."
+    else "数値は90分あたりの回数です（パーセンタイルではありません）。",
+    "save_hint": "Long-press the image to save it to Photos."
     if is_english
     else "下の画像を長押しすると、写真に保存できます。",
     "download": "Download PNG" if is_english else "PNGをダウンロード",
@@ -61,7 +61,6 @@ st.markdown(
     <style>
       .block-container { padding-top: 0.8rem; padding-bottom: 1.2rem; }
       div[data-testid="stVerticalBlock"] > div { gap: 0.25rem !important; }
-      .stPlotlyChart { margin-top: -1.0rem !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -88,17 +87,6 @@ base_url = "https://api.sportmonks.com/v3/football"
 default_season_id = 27897
 season_id = default_season_id
 
-# 画面用（日本語） / 書き出し用（英語・文字化け防止）
-STATISTIC_NAMES_JA = {
-    52: "ゴール",
-    79: "アシスト",
-    194: "シュート",
-    214: "タックル",
-    215: "インターセプト",
-    216: "クリア",
-    321: "空中戦",
-    322: "ドリブル",
-}
 STATISTIC_NAMES_EN = {
     52: "Goals",
     79: "Assists",
@@ -139,7 +127,7 @@ def get_logo_data_uri():
     return f"data:image/png;base64,{encoded_logo}"
 
 
-def build_radar_figure(labels, values, title_lines, radial_max, for_export=False):
+def build_radar_figure(labels, values, title_lines, radial_max):
     chart_labels = labels + [labels[0]]
     chart_values = values + [values[0]]
 
@@ -156,7 +144,6 @@ def build_radar_figure(labels, values, title_lines, radial_max, for_export=False
                 "line": {"color": NAVY, "width": 2.5},
             },
             mode="lines+markers",
-            hovertemplate="%{theta}: %{r}<extra></extra>",
         )
     )
 
@@ -193,8 +180,8 @@ def build_radar_figure(labels, values, title_lines, radial_max, for_export=False
     )
 
     fig.update_layout(
-        height=720 if for_export else 540,
-        margin={"l": 50, "r": 50, "t": 90 if for_export else 20, "b": 70},
+        height=720,
+        margin={"l": 50, "r": 50, "t": 90, "b": 70},
         paper_bgcolor=WHITE,
         plot_bgcolor=WHITE,
         font={"color": NAVY, "size": 13, "family": "Arial"},
@@ -370,7 +357,6 @@ try:
         if tid in RADAR_ORDER and isinstance(val, (int, float)):
             raw_by_id[tid] = val
 
-    labels_ja = [STATISTIC_NAMES_JA[i] for i in RADAR_ORDER]
     labels_en = [STATISTIC_NAMES_EN[i] for i in RADAR_ORDER]
     raw_values = [raw_by_id.get(i, 0) for i in RADAR_ORDER]
 
@@ -391,7 +377,7 @@ try:
             border-left:5px solid {NAVY};
             border-radius:10px;
             padding:10px 12px 8px;
-            margin:2px 0 0;
+            margin:2px 0 8px;
         ">
           <div style="font-size:22px;font-weight:800;color:{NAVY};line-height:1.2;">
             {selected_player_name}
@@ -415,24 +401,6 @@ try:
         st.info(TEXT["no_stats"])
     else:
         radial_max = max(max(display_values) * 1.15, 1.0)
-        screen_labels = labels_en if is_english else labels_ja
-
-        # 画面表示用（言語に合わせる）
-        fig_screen = build_radar_figure(
-            screen_labels,
-            display_values,
-            title_lines=[],
-            radial_max=radial_max,
-            for_export=False,
-        )
-        st.plotly_chart(
-            fig_screen,
-            use_container_width=True,
-            config={"displayModeBar": False},
-        )
-        st.caption(TEXT["per90_note"])
-
-        # 書き出し用（英語ラベル + 選手情報を画像に焼き込み）
         title_lines = [
             selected_player_name,
             f"{selected_team_name}  |  {minutes} min  |  {scale_label}",
@@ -443,7 +411,6 @@ try:
             display_values,
             title_lines=title_lines,
             radial_max=radial_max,
-            for_export=True,
         )
 
         try:
@@ -455,6 +422,7 @@ try:
             )
             st.markdown(f"**{TEXT['save_hint']}**")
             st.image(png_data, use_container_width=True)
+            st.caption(TEXT["per90_note"])
             st.download_button(
                 label=TEXT["download"],
                 data=png_data,
