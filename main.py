@@ -28,6 +28,7 @@ CACHE_ROOT = Path(__file__).with_name("cache") / "superliga"
 POSITION_MAP = {24: "GK", 25: "DEF", 26: "MID", 27: "FWD"}
 MAX_BETWEEN_DAYS = 90
 MAX_SEASONS = 3
+SMALL_SAMPLE_N = 15  # これ未満なら注意表示
 
 BAND_ELITE = "#5C7A9A"
 BAND_STRONG = "#8BB0F5"
@@ -186,9 +187,14 @@ T = {
         "レーダーの**形** = Percentile · 頂点の**数字** = Per90（または%）。"
     ),
     "early_note": (
-        "Early season: small samples make percentiles more volatile."
+        "Early season: overall sample is still building — treat percentiles as indicative."
         if is_en
-        else "シーズン序盤は母集団が小さいため、Percentileは参考値として見てください。"
+        else "シーズン序盤は全体の母集団がまだ小さいため、Percentileは参考値として見てください。"
+    ),
+    "small_sample": (
+        "⚠ Small sample (n={n}) — percentile ranks can swing a lot with a few players."
+        if is_en
+        else "⚠ 母集団が小さいです（n={n}）。数人の増減でPercentileが大きく動きやすいので参考値として見てください。"
     ),
     "band_legend": (
         "Elite 90+ · Strong 70–89 · Average 30–69 · Below <30"
@@ -201,10 +207,6 @@ T = {
     "last_updated": "Last updated" if is_en else "最終更新",
     "connected": "Connected" if is_en else "接続済み",
     "apps": "Apps" if is_en else "出場数",
-    "rebuild_ok": "Aggregate rebuilt" if is_en else "Aggregate再構築",
-    "skip_ok": "No new fixtures · using existing aggregate"
-    if is_en
-    else "新規なし · 既存Aggregateを使用",
     "season_loading": "Loading season data..." if is_en else "シーズンデータを読み込み中...",
 }
 
@@ -343,7 +345,6 @@ def _date_chunks(start_s, end_s, max_days=MAX_BETWEEN_DAYS):
 
 
 def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, display_texts):
-    """ポリゴンのみ。形=Percentile / 外側数字=Per90。"""
     r_poly = values + [values[0]]
     theta = labels + [labels[0]]
     colors_closed = marker_colors + [marker_colors[0]]
@@ -998,10 +999,6 @@ def incremental_update(sid, season_meta_row, force_all=False):
                 "updated_at": (meta or {}).get("updated_at") or now,
                 "mode": "incremental_skip_rebuild",
                 "season_id": sid,
-                "methods_tried": flist.get("methods_tried"),
-                "list_errors": flist.get("list_errors"),
-                "season_meta_start": flist.get("season_meta_start"),
-                "season_meta_end": flist.get("season_meta_end"),
             }
             return aggs, status, errors
 
@@ -1019,10 +1016,6 @@ def incremental_update(sid, season_meta_row, force_all=False):
         "mode": "rebuild",
         "season_id": sid,
         "updated_at": now,
-        "methods_tried": flist.get("methods_tried"),
-        "list_errors": flist.get("list_errors"),
-        "season_meta_start": flist.get("season_meta_start"),
-        "season_meta_end": flist.get("season_meta_end"),
     }
     save_aggs(sid, aggs, status)
     return aggs, status, errors
@@ -1118,13 +1111,22 @@ else:
         all_players = [g for g in all_players if g["Team"] == team_filter]
 
     n_total = sum(len(v) for v in by_pos.values())
+    n_by_pos = {p: len(by_pos[p]) for p in ("GK", "DEF", "MID", "FWD")}
     cap = (
-        f"n={n_total} · GK{len(by_pos['GK'])} / DEF{len(by_pos['DEF'])} / "
-        f"MID{len(by_pos['MID'])} / FWD{len(by_pos['FWD'])}"
+        f"n={n_total} · GK{n_by_pos['GK']} / DEF{n_by_pos['DEF']} / "
+        f"MID{n_by_pos['MID']} / FWD{n_by_pos['FWD']}"
     )
-    if float(min_min) >= 300:
-        cap += f" · {T['early_note']}"
     st.caption(cap)
+
+    # 全体が小さい / いずれかのポジションが小さい
+    if 0 < n_total < 40:
+        st.info(T["early_note"])
+    tiny_pos = [p for p, n in n_by_pos.items() if 0 < n < SMALL_SAMPLE_N]
+    if tiny_pos:
+        st.caption(
+            ("Small position samples: " if is_en else "母集団が小さいポジション: ")
+            + ", ".join(f"{p} n={n_by_pos[p]}" for p in tiny_pos)
+        )
 
     if not all_players:
         st.warning(T["no_players"])
@@ -1140,6 +1142,7 @@ else:
         pos = selected["Pos"]
         mdefs = POSITION_METRICS[pos]
         n_pos = len(by_pos[pos])
+        is_small = n_pos < SMALL_SAMPLE_N
 
         st.markdown(
             f"""
@@ -1153,6 +1156,9 @@ else:
             """,
             unsafe_allow_html=True,
         )
+
+        if is_small:
+            st.warning(T["small_sample"].format(n=n_pos))
 
         with st.expander(T["pct_title"], expanded=False):
             st.markdown(T["pct_body"])
@@ -1188,8 +1194,16 @@ else:
                 fmt_radar_label(metric_v, is_ratio=(m["kind"] == "ratio"))
             )
 
+        sample_line = f"Sample: {pos}, ≥{int(min_min)} min (n={n_pos})"
+        if is_small:
+            sample_line += (
+                " · ⚠ Small sample"
+                if is_en
+                else " · ⚠ 母集団小・参考値"
+            )
+
         footnotes = [
-            f"Shape = percentile (0–100) · Labels = Per90 (or %) · Sample: {pos}, ≥{int(min_min)} min (n={n_pos})",
+            f"Shape = percentile (0–100) · Labels = Per90 (or %) · {sample_line}",
             "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30  |  Conceded/Fouls inverted",
             "Per90 uses Minutes Played · Pass Acc = Σ accurate ÷ Σ passes · Fixture aggregate",
             f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
@@ -1236,26 +1250,25 @@ else:
         )
 
 with st.expander(T["method_title"], expanded=False):
-    if is_en:
-        st.markdown(
-            """
-**Data source**
-- Sportmonks Football API · Superliga (271) · Fixture `lineups.details`
-
-**Chart**
-- Shape = percentile · Outer labels = Per90 (or %)
-            """
-        )
-    else:
-        st.markdown(
-            """
+    st.markdown(
+        """
 **データソース**
 - Sportmonks · Superliga · 試合単位 `lineups.details`
 
 **チャート**
 - 形 = Percentile · 外側の数字 = Per90（または%）
-            """
-        )
+- 母集団 n&lt;15 のポジションは注意表示
+        """
+        if not is_en
+        else """
+**Data source**
+- Sportmonks · Superliga · Fixture `lineups.details`
+
+**Chart**
+- Shape = percentile · Labels = Per90 (or %)
+- Warning when position sample n&lt;15
+        """
+    )
 
 with st.expander(T["admin_title"], expanded=False):
     force_all = st.checkbox(T["force"], value=False)
@@ -1275,12 +1288,8 @@ with st.expander(T["admin_title"], expanded=False):
         {
             "season_id": season_id,
             "finished_fixtures": status.get("finished_fixtures"),
-            "total_fetched": status.get("total_fetched"),
             "players": status.get("players") or (len(aggs) if aggs else 0),
             "updated_at": status.get("updated_at"),
             "mode": status.get("mode"),
-            "errors": status.get("errors")
-            if status.get("errors") is not None
-            else len(errors),
         }
     )
