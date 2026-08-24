@@ -1,5 +1,6 @@
 import base64
 import json
+import math
 import os
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -251,6 +252,16 @@ T = {
     "tab_radar": "⚽ Player Radar" if is_en else "⚽ 選手レーダー",
     "tab_compare": "⚔️ Compare" if is_en else "⚔️ 選手比較",
     "tab_discover": "🔍 Discover" if is_en else "🔍 探索",
+    "tab_similar": "👥 Similar" if is_en else "👥 類似選手",
+    "similar_hint": (
+        "Find same-position players with a similar percentile profile (radar shape)."
+        if is_en
+        else "同ポジションで Percentile の形が近い選手を探します。"
+    ),
+    "ref_player": "Reference player" if is_en else "基準選手",
+    "top_n": "Show top" if is_en else "表示件数",
+    "similarity": "Similarity" if is_en else "類似度",
+    "no_similar": "Not enough players to compare." if is_en else "比較できる選手が足りません。",
 }
 
 st.markdown(
@@ -691,6 +702,27 @@ def player_key(g):
     return f"{g.get('Player')}|{g.get('Team')}|{g.get('Pos')}|{g.get('Minutes')}"
 
 
+def pct_vector(g, mdefs):
+    """Percentileベクトル。欠損は50で埋める。"""
+    vec = []
+    for m in mdefs:
+        p = g.get("pct", {}).get(m["key"])
+        vec.append(50.0 if p is None else float(p))
+    return vec
+
+
+def similarity_score(vec_a, vec_b):
+    """ユークリッド距離 → 0–100の類似度（高いほど近い）。"""
+    if not vec_a or len(vec_a) != len(vec_b):
+        return 0.0
+    dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(vec_a, vec_b)))
+    # 各軸0–100なので最大距離は 100*sqrt(n)
+    max_dist = 100.0 * math.sqrt(len(vec_a))
+    if max_dist <= 0:
+        return 100.0
+    return round(max(0.0, 100.0 * (1.0 - dist / max_dist)), 1)
+
+
 def build_position_pools(aggs, team_id_to_name, min_min):
     by_pos = {p: [] for p in POSITIONS}
     for a in aggs.values():
@@ -819,7 +851,7 @@ if st.session_state.get("loaded_season_id") != season_id:
     st.session_state.pop("pools_data", None)
     st.session_state.pop("_pools_key", None)
     for k in list(st.session_state.keys()):
-        if k.startswith(("player_", "disc_", "cmp_", "radar_")):
+        if k.startswith(("player_", "disc_", "cmp_", "radar_", "sim_")):
             del st.session_state[k]
 
 teams_res = requests.get(
@@ -1202,8 +1234,8 @@ if not aggs:
     st.warning(T["no_fixtures"] if status.get("finished_fixtures") == 0 else T["no_data"])
     st.stop()
 
-tab_radar, tab_compare, tab_discover = st.tabs(
-    [T["tab_radar"], T["tab_compare"], T["tab_discover"]]
+tab_radar, tab_compare, tab_discover, tab_similar = st.tabs(
+    [T["tab_radar"], T["tab_compare"], T["tab_discover"], T["tab_similar"]]
 )
 
 # -------------------- RADAR --------------------
@@ -1586,11 +1618,103 @@ with tab_discover:
                 else "詳細は 選手レーダー タブで選手を選んで確認できます。"
             )
 
+# -------------------- SIMILAR PLAYERS --------------------
+with tab_similar:
+    st.caption(T["similar_hint"])
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        pos_s = st.selectbox(T["position"], list(POSITIONS), index=2, key="sim_pos")
+    with s2:
+        min_min_s = st.selectbox(
+            T["min_minutes"], [0, 300, 600, 900], index=1, key="sim_min"
+        )
+    by_pos_s = get_pools_cached(season_id, min_min_s, aggs, team_id_to_name)
+    pool_s = by_pos_s[pos_s]
+    teams_s = sorted({str(g["Team"]) for g in pool_s if g.get("Team")})
+    with s3:
+        team_s = st.selectbox(
+            T["team"], [T["all_teams"]] + teams_s, key="sim_team"
+        )
+
+    # 基準選手はチームフィルタ後の一覧から選ぶ
+    pool_ref = (
+        pool_s if team_s == T["all_teams"] else [g for g in pool_s if g["Team"] == team_s]
+    )
+    pool_ref = sorted(pool_ref, key=lambda g: (g["Player"] or "").lower())
+    n_pos = len(pool_s)
+    if 0 < n_pos < SMALL_SAMPLE_N:
+        st.warning(T["small_sample"].format(n=n_pos))
+
+    if len(pool_s) < 2 or not pool_ref:
+        st.warning(T["no_similar"])
+    else:
+        labels_ref = [
+            f"{g['Player']} · {g['Team']} · {g['Minutes']}′" for g in pool_ref
+        ]
+        choice_ref = st.selectbox(T["ref_player"], labels_ref, key="sim_ref")
+        ref = pool_ref[labels_ref.index(choice_ref)]
+        top_n = st.selectbox(T["top_n"], [5, 10, 15], index=1, key="sim_topn")
+
+        mdefs = POSITION_METRICS[pos_s]
+        ref_vec = pct_vector(ref, mdefs)
+
+        scored = []
+        for g in pool_s:
+            if player_key(g) == player_key(ref):
+                continue
+            sim = similarity_score(ref_vec, pct_vector(g, mdefs))
+            scored.append((sim, g))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        scored = scored[: int(top_n)]
+
+        st.markdown(f"##### {T['results']}")
+        if not scored:
+            st.warning(T["no_similar"])
+        else:
+            rows = []
+            for rank, (sim, g) in enumerate(scored, start=1):
+                row = {
+                    "#": rank,
+                    "Player": g["Player"],
+                    "Team": g["Team"],
+                    "Minutes": g["Minutes"],
+                    T["similarity"]: sim,
+                }
+                # 主要%ileを数個（先頭4指標）
+                for m in mdefs[:4]:
+                    row[f"{m['label']} %ile"] = fmt_num(
+                        g.get("pct", {}).get(m["key"]), "pct"
+                    )
+                rows.append(row)
+            df = pd.DataFrame(rows)
+            pct_cols = [c for c in df.columns if "%ile" in c]
+            st.caption(
+                f"{ref['Player']} · {pos_s} · n={n_pos}"
+                + (
+                    " · similarity from percentile shape"
+                    if is_en
+                    else " · Percentile形状に基づく類似度"
+                )
+            )
+            if pct_cols:
+                st.dataframe(
+                    df.style.map(style_percentile_col, subset=pct_cols),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.dataframe(df, use_container_width=True, hide_index=True)
+            st.caption(
+                "Open Compare or Player Radar to inspect profiles."
+                if is_en
+                else "詳細は 選手比較 または 選手レーダー タブで確認できます。"
+            )
+
 with st.expander(T["method_title"], expanded=False):
     st.markdown(
-        "形=Percentile · 頂点色=帯（単体） · 比較=紺/オレンジ · 探索=同じ母集団"
+        "形=Percentile · 類似度=同ポジションのPercentileベクトル距離 · 探索=条件フィルタ"
         if not is_en
-        else "Shape=percentile · Vertex=band (single) · Compare=navy/orange · Discover=same pool"
+        else "Shape=percentile · Similarity=percentile-vector distance · Discover=filters"
     )
 
 with st.expander(T["admin_title"], expanded=False):
