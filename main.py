@@ -703,7 +703,6 @@ def player_key(g):
 
 
 def pct_vector(g, mdefs):
-    """Percentileベクトル。欠損は50で埋める。"""
     vec = []
     for m in mdefs:
         p = g.get("pct", {}).get(m["key"])
@@ -712,11 +711,9 @@ def pct_vector(g, mdefs):
 
 
 def similarity_score(vec_a, vec_b):
-    """ユークリッド距離 → 0–100の類似度（高いほど近い）。"""
     if not vec_a or len(vec_a) != len(vec_b):
         return 0.0
     dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(vec_a, vec_b)))
-    # 各軸0–100なので最大距離は 100*sqrt(n)
     max_dist = 100.0 * math.sqrt(len(vec_a))
     if max_dist <= 0:
         return 100.0
@@ -1636,7 +1633,6 @@ with tab_similar:
             T["team"], [T["all_teams"]] + teams_s, key="sim_team"
         )
 
-    # 基準選手はチームフィルタ後の一覧から選ぶ
     pool_ref = (
         pool_s if team_s == T["all_teams"] else [g for g in pool_s if g["Team"] == team_s]
     )
@@ -1672,6 +1668,21 @@ with tab_similar:
             st.warning(T["no_similar"])
         else:
             rows = []
+            # 先頭: 基準選手
+            ref_row = {
+                "#": "★",
+                "Player": ref["Player"],
+                "Team": ref["Team"],
+                "Minutes": ref["Minutes"],
+                T["similarity"]: 100.0,
+            }
+            for m in mdefs[:4]:
+                ref_row[f"{m['label']} %ile"] = fmt_num(
+                    ref.get("pct", {}).get(m["key"]), "pct"
+                )
+            rows.append(ref_row)
+
+            # 2行目以降: 類似選手（1から）
             for rank, (sim, g) in enumerate(scored, start=1):
                 row = {
                     "#": rank,
@@ -1680,20 +1691,20 @@ with tab_similar:
                     "Minutes": g["Minutes"],
                     T["similarity"]: sim,
                 }
-                # 主要%ileを数個（先頭4指標）
                 for m in mdefs[:4]:
                     row[f"{m['label']} %ile"] = fmt_num(
                         g.get("pct", {}).get(m["key"]), "pct"
                     )
                 rows.append(row)
+
             df = pd.DataFrame(rows)
             pct_cols = [c for c in df.columns if "%ile" in c]
             st.caption(
                 f"{ref['Player']} · {pos_s} · n={n_pos}"
                 + (
-                    " · similarity from percentile shape"
+                    " · ★ = reference · similarity from percentile shape"
                     if is_en
-                    else " · Percentile形状に基づく類似度"
+                    else " · ★ = 基準選手 · Percentile形状に基づく類似度"
                 )
             )
             if pct_cols:
@@ -1712,9 +1723,9 @@ with tab_similar:
 
 with st.expander(T["method_title"], expanded=False):
     st.markdown(
-        "形=Percentile · 類似度=同ポジションのPercentileベクトル距離 · 探索=条件フィルタ"
+        "形=Percentile · 類似度=同ポジションのPercentileベクトル距離 · ★=基準選手"
         if not is_en
-        else "Shape=percentile · Similarity=percentile-vector distance · Discover=filters"
+        else "Shape=percentile · Similarity=percentile-vector distance · ★=reference"
     )
 
 with st.expander(T["admin_title"], expanded=False):
