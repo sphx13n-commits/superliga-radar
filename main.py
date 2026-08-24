@@ -9,11 +9,39 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="Superliga Radar",
     page_icon="⚽",
     layout="centered",
+)
+
+# 初回表示・再読込時はページ先頭へ（途中表示防止）
+components.html(
+    """
+    <script>
+    (function () {
+      try {
+        if (window.parent && window.parent.history) {
+          window.parent.history.scrollRestoration = 'manual';
+        }
+      } catch (e) {}
+      function toTop() {
+        try {
+          const doc = window.parent.document;
+          const main = doc.querySelector('section.main') || doc.scrollingElement || doc.body;
+          if (main && main.scrollTo) main.scrollTo(0, 0);
+          if (window.parent.scrollTo) window.parent.scrollTo(0, 0);
+        } catch (e) {}
+      }
+      toTop();
+      setTimeout(toTop, 50);
+      setTimeout(toTop, 200);
+    })();
+    </script>
+    """,
+    height=0,
 )
 
 NAVY = "#0B1F3A"
@@ -470,7 +498,6 @@ def build_radar_figure(
         )
 
     annotations = []
-    # 比較時はタイトルが長いのでやや小さめ
     if values_b is not None:
         title_sizes = [32, 18, 14]
         title_ys = [0.975, 0.935, 0.905]
@@ -546,7 +573,6 @@ def build_radar_figure(
     )
 
     images = []
-    # 比較時はタイトルが長いのでクラブロゴは出さない（被り防止）
     if club_logo_uri and values_b is None:
         images.append(
             {
@@ -706,7 +732,6 @@ def build_position_pools(aggs, team_id_to_name, min_min):
 
 
 def get_pools_cached(season_id, min_min, aggs, team_id_to_name):
-    """同一シーズン×出場時間のプールを session に保持して Discover の再計算を抑える"""
     key = f"pools_{season_id}_{int(min_min)}"
     if st.session_state.get("_pools_key") != key or "pools_data" not in st.session_state:
         st.session_state["_pools_key"] = key
@@ -1324,7 +1349,7 @@ with tab_radar:
         else:
             st.dataframe(df, use_container_width=True, hide_index=True)
 
-# -------------------- COMPARE（チーム → 選手） --------------------
+# -------------------- COMPARE --------------------
 with tab_compare:
     c1, c2 = st.columns(2)
     with c1:
@@ -1410,7 +1435,6 @@ with tab_compare:
                     "Percentile comparison",
                 ]
                 st.markdown(f"##### {T['radar']}")
-                # 比較時はクラブロゴなし（タイトル被り防止）
                 fig = build_radar_figure(
                     radar_labels,
                     values_a,
