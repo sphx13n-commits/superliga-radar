@@ -83,6 +83,7 @@ def fmt_radar_label(v, is_ratio=False):
     return s.rstrip("0").rstrip(".") or "0"
 
 
+# GK: 変更なし / MID・DEF・FWD: 各10本
 POSITION_METRICS = {
     "GK": [
         {"key": "saves_p90", "label": "Saves/90", "tid": 57, "kind": "per90"},
@@ -100,6 +101,8 @@ POSITION_METRICS = {
         {"key": "aerial_p90", "label": "Aerials/90", "tid": 107, "kind": "per90"},
         {"key": "pass_acc", "label": "Pass Acc %", "kind": "ratio", "num": 116, "den": 80},
         {"key": "acc_pass_p90", "label": "Acc Pass/90", "tid": 116, "kind": "per90"},
+        {"key": "passes_p90", "label": "Passes/90", "tid": 80, "kind": "per90"},
+        {"key": "succ_drib_p90", "label": "Succ Drib/90", "tid": 109, "kind": "per90"},
         {"key": "recovery_p90", "label": "Recovery/90", "tid": 27271, "kind": "per90"},
         {"key": "fouls_p90", "label": "Fouls/90", "tid": 56, "kind": "lower_better_per90"},
     ],
@@ -108,6 +111,8 @@ POSITION_METRICS = {
         {"key": "pass_acc", "label": "Pass Acc %", "kind": "ratio", "num": 116, "den": 80},
         {"key": "key_p90", "label": "Key Pass/90", "tid": 117, "kind": "per90"},
         {"key": "assists_p90", "label": "Assists/90", "tid": 79, "kind": "per90"},
+        {"key": "goals_p90", "label": "Goals/90", "tid": 52, "kind": "per90"},
+        {"key": "shots_p90", "label": "Shots/90", "tid": 42, "kind": "per90"},
         {"key": "tackles_p90", "label": "Tackles/90", "tid": 78, "kind": "per90"},
         {"key": "int_p90", "label": "Intercepts/90", "tid": 100, "kind": "per90"},
         {"key": "succ_drib_p90", "label": "Succ Drib/90", "tid": 109, "kind": "per90"},
@@ -122,6 +127,8 @@ POSITION_METRICS = {
         {"key": "drib_att_p90", "label": "Drib Att/90", "tid": 108, "kind": "per90"},
         {"key": "succ_drib_p90", "label": "Succ Drib/90", "tid": 109, "kind": "per90"},
         {"key": "aerial_p90", "label": "Aerials/90", "tid": 107, "kind": "per90"},
+        {"key": "pass_acc", "label": "Pass Acc %", "kind": "ratio", "num": 116, "den": 80},
+        {"key": "recovery_p90", "label": "Recovery/90", "tid": 27271, "kind": "per90"},
     ],
 }
 
@@ -312,15 +319,10 @@ def format_updated_at(iso_str):
 
 
 def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, display_texts):
-    """
-    values: Percentile → 形
-    display_texts: Per90/% → 数字（常に外側の固定位置）
-    """
     r_poly = values + [values[0]]
     theta = labels + [labels[0]]
     colors_closed = marker_colors + [marker_colors[0]]
 
-    # 数字は中心に寄せず、常に外側リングへ
     OUTER_R = 108
     r_text = [OUTER_R] * len(values)
     r_text_closed = r_text + [r_text[0]]
@@ -336,7 +338,7 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, di
             line={"color": NAVY, "width": 3.8},
             marker={
                 "color": colors_closed,
-                "size": 20,
+                "size": 18,
                 "line": {"color": NAVY, "width": 1.6},
             },
             mode="lines+markers",
@@ -350,7 +352,7 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, di
             mode="text",
             text=text_closed,
             textfont={
-                "size": 22,
+                "size": 20,
                 "color": NAVY,
                 "family": "Arial Black, Arial, sans-serif",
             },
@@ -429,17 +431,18 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, di
             }
         )
 
+    # 10軸でも見切れにくいよう余白をやや広め
     fig.update_layout(
         height=1500,
         width=1200,
-        margin={"l": 110, "r": 110, "t": 160, "b": 170},
+        margin={"l": 120, "r": 120, "t": 160, "b": 170},
         paper_bgcolor=WHITE,
         plot_bgcolor=WHITE,
         showlegend=False,
         images=images,
         annotations=annotations,
         polar={
-            "domain": {"x": [0.14, 0.86], "y": [0.18, 0.80]},
+            "domain": {"x": [0.15, 0.85], "y": [0.18, 0.80]},
             "bgcolor": BG,
             "radialaxis": {
                 "visible": True,
@@ -454,7 +457,7 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, di
                 "linecolor": AXIS,
                 "tickfont": {
                     "color": NAVY,
-                    "size": 16,
+                    "size": 14,
                     "family": "Arial",
                 },
                 "rotation": 90,
