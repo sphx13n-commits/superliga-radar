@@ -170,7 +170,9 @@ T = {
     "no_data": "No data yet." if is_en else "データがありません。",
     "no_fixtures": "No finished fixtures found." if is_en else "終了試合が取得できませんでした。",
     "no_players": "No players match the filters." if is_en else "条件に合う選手がいません。",
-    "no_compare": "No other players in this position." if is_en else "同ポジションに比較できる選手がいません。",
+    "no_compare": "No other players in this position."
+    if is_en
+    else "同ポジションに比較できる選手がいません。",
     "pct_title": "What is Percentile?" if is_en else "Percentileとは？",
     "pct_body": (
         "Same-position ranking 0–100 under the minute filter.\n\n"
@@ -349,14 +351,10 @@ def build_radar_figure(
     name_a=None,
     name_b=None,
 ):
-    """
-    形 = Percentile（0–100）。
-    軸レンジは 0–108（100がほぼ外縁）。ラベル用にわずかな余白のみ。
-    """
+    """形 = Percentile 0–100。軸 [0,100] で100%が外縁。"""
     fig = go.Figure()
     theta = labels + [labels[0]]
 
-    # Player A
     r_a = values_a + [values_a[0]]
     fig.add_trace(
         go.Scatterpolar(
@@ -372,7 +370,6 @@ def build_radar_figure(
         )
     )
 
-    # Player B (optional)
     if values_b is not None:
         r_b = values_b + [values_b[0]]
         fig.add_trace(
@@ -393,9 +390,8 @@ def build_radar_figure(
             )
         )
 
-    # Per90 labels only in single mode（100のすぐ外側）
     if values_b is None and display_texts is not None:
-        OUTER_R = 104
+        OUTER_R = 100
         r_text = [OUTER_R] * len(labels) + [OUTER_R]
         text_closed = list(display_texts) + [display_texts[0]]
         fig.add_trace(
@@ -405,7 +401,7 @@ def build_radar_figure(
                 mode="text",
                 text=text_closed,
                 textfont={
-                    "size": 20,
+                    "size": 18,
                     "color": NAVY,
                     "family": "Arial Black, Arial, sans-serif",
                 },
@@ -506,18 +502,18 @@ def build_radar_figure(
     fig.update_layout(
         height=1500,
         width=1200,
-        margin={"l": 120, "r": 120, "t": 155, "b": 170},
+        margin={"l": 130, "r": 130, "t": 155, "b": 170},
         paper_bgcolor=WHITE,
         plot_bgcolor=WHITE,
         showlegend=False,
         images=images,
         annotations=annotations,
         polar={
-            "domain": {"x": [0.15, 0.85], "y": [0.19, 0.80]},
+            "domain": {"x": [0.14, 0.86], "y": [0.19, 0.80]},
             "bgcolor": BG,
             "radialaxis": {
                 "visible": True,
-                "range": [0, 108],  # 100がほぼ外縁（旧122から縮小）
+                "range": [0, 100],
                 "tickvals": [0, 20, 40, 60, 80, 100],
                 "gridcolor": GRID,
                 "linecolor": AXIS,
