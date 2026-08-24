@@ -160,7 +160,6 @@ T = {
         else "デンマーク・スーペルリーガの選手を、ポジション別Percentileレーダーで探索。"
     ),
     "season": "Season" if is_en else "シーズン",
-    "filters": "Filters" if is_en else "フィルター",
     "min_minutes": "Minimum minutes" if is_en else "最低出場時間",
     "team": "Team" if is_en else "チーム",
     "all_teams": "All teams" if is_en else "すべてのチーム",
@@ -168,6 +167,8 @@ T = {
     "position": "Position" if is_en else "ポジション",
     "player_a": "Player A" if is_en else "選手 A",
     "player_b": "Player B" if is_en else "選手 B",
+    "team_a": "Team A" if is_en else "チーム A",
+    "team_b": "Team B" if is_en else "チーム B",
     "radar": "Percentile radar" if is_en else "Percentileレーダー",
     "stats": "Statistics" if is_en else "スタッツ詳細",
     "download": "Download PNG" if is_en else "PNGをダウンロード",
@@ -185,12 +186,10 @@ T = {
     "pct_title": "What is Percentile?" if is_en else "Percentileとは？",
     "pct_body": (
         "Same-position ranking 0–100 under the minute filter.\n\n"
-        "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30\n\n"
-        "Shape = percentile · Vertex color = band (single) · Bold ring = 100 · Labels = Per90."
+        "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30"
         if is_en
         else "同ポジション・出場時間条件での順位（0–100）。\n\n"
-        "帯: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満\n\n"
-        "形 = Percentile · 頂点色 = 帯（単体） · 太い円 = 100 · 数字 = Per90。"
+        "帯: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満"
     ),
     "early_note": (
         "Early season: overall sample is still building — treat percentiles as indicative."
@@ -214,14 +213,13 @@ T = {
     "apps": "Apps" if is_en else "出場数",
     "season_loading": "Loading..." if is_en else "読み込み中...",
     "discover_hint": (
-        "Enable metrics and set a minimum percentile. Results use the same pool as Radar."
+        "Enable metrics and set a minimum percentile. Same pool as Radar."
         if is_en
-        else "指標を有効化し、最低Percentileを設定。母集団はRadarと同じ定義です。"
+        else "指標を有効化し、最低Percentileを設定。母集団はRadarと同じです。"
     ),
     "metric_filters": "Metric filters" if is_en else "指標フィルタ",
     "results": "Results" if is_en else "検索結果",
     "no_results": "No players match the filters." if is_en else "条件に合う選手がいません。",
-    "enable": "Use" if is_en else "使用",
     "min_pct": "Min %ile" if is_en else "最低%ile",
 }
 
@@ -472,8 +470,14 @@ def build_radar_figure(
         )
 
     annotations = []
-    title_sizes = [44, 20, 16]
-    title_ys = [0.985, 0.938, 0.905]
+    # 比較時はタイトルが長いのでやや小さめ
+    if values_b is not None:
+        title_sizes = [32, 18, 14]
+        title_ys = [0.975, 0.935, 0.905]
+    else:
+        title_sizes = [44, 20, 16]
+        title_ys = [0.985, 0.938, 0.905]
+
     for i, line in enumerate(title_lines):
         annotations.append(
             {
@@ -542,7 +546,8 @@ def build_radar_figure(
     )
 
     images = []
-    if club_logo_uri:
+    # 比較時はタイトルが長いのでクラブロゴは出さない（被り防止）
+    if club_logo_uri and values_b is None:
         images.append(
             {
                 "source": club_logo_uri,
@@ -659,7 +664,6 @@ def player_key(g):
 
 
 def build_position_pools(aggs, team_id_to_name, min_min):
-    """共通: 出場時間フィルタ + Per90 + Percentile（Radar/Compare/Discover同一）"""
     by_pos = {p: [] for p in POSITIONS}
     for a in aggs.values():
         mins = a["minutes"]
@@ -701,6 +705,17 @@ def build_position_pools(aggs, team_id_to_name, min_min):
     return by_pos
 
 
+def get_pools_cached(season_id, min_min, aggs, team_id_to_name):
+    """同一シーズン×出場時間のプールを session に保持して Discover の再計算を抑える"""
+    key = f"pools_{season_id}_{int(min_min)}"
+    if st.session_state.get("_pools_key") != key or "pools_data" not in st.session_state:
+        st.session_state["_pools_key"] = key
+        st.session_state["pools_data"] = build_position_pools(
+            aggs, team_id_to_name, min_min
+        )
+    return st.session_state["pools_data"]
+
+
 def render_png(fig, fname_base):
     try:
         png = fig.to_image(format="png", width=1200, height=1500, scale=2)
@@ -717,7 +732,6 @@ def render_png(fig, fname_base):
         return False
 
 
-# ---------- API / cache (unchanged core) ----------
 league_res = requests.get(
     f"{base_url}/leagues/{LEAGUE_ID}",
     headers=headers,
@@ -759,7 +773,6 @@ if default_name is None:
         season_names[0] if season_names else "",
     )
 
-# ===== 共通 Season（上部） =====
 st.markdown(f"##### {T['season']}")
 selected_season_name = st.selectbox(
     T["season"],
@@ -776,8 +789,10 @@ if st.session_state.get("loaded_season_id") != season_id:
     st.session_state.fx_status = None
     st.session_state.fx_errors = []
     st.session_state.loaded_season_id = season_id
+    st.session_state.pop("pools_data", None)
+    st.session_state.pop("_pools_key", None)
     for k in list(st.session_state.keys()):
-        if k.startswith(("player_", "disc_", "cmp_")):
+        if k.startswith(("player_", "disc_", "cmp_", "radar_")):
             del st.session_state[k]
 
 teams_res = requests.get(
@@ -1160,19 +1175,18 @@ if not aggs:
     st.warning(T["no_fixtures"] if status.get("finished_fixtures") == 0 else T["no_data"])
     st.stop()
 
-# ===== Tabs =====
 tab_radar, tab_compare, tab_discover = st.tabs(
     ["⚽ Player Radar", "⚔️ Compare", "🔍 Discover"]
 )
 
-# -------------------- TAB: RADAR --------------------
+# -------------------- RADAR --------------------
 with tab_radar:
     f1, f2 = st.columns(2)
     with f1:
         min_min_r = st.selectbox(
             T["min_minutes"], [0, 300, 600, 900], index=1, key="radar_min"
         )
-    by_pos_r = build_position_pools(aggs, team_id_to_name, min_min_r)
+    by_pos_r = get_pools_cached(season_id, min_min_r, aggs, team_id_to_name)
     all_r = [g for pos in by_pos_r.values() for g in pos]
     teams_r = sorted({str(g["Team"]) for g in all_r if g.get("Team")})
     with f2:
@@ -1310,7 +1324,7 @@ with tab_radar:
         else:
             st.dataframe(df, use_container_width=True, hide_index=True)
 
-# -------------------- TAB: COMPARE --------------------
+# -------------------- COMPARE（チーム → 選手） --------------------
 with tab_compare:
     c1, c2 = st.columns(2)
     with c1:
@@ -1320,100 +1334,130 @@ with tab_compare:
     with c2:
         pos_c = st.selectbox(T["position"], list(POSITIONS), index=2, key="cmp_pos")
 
-    by_pos_c = build_position_pools(aggs, team_id_to_name, min_min_c)
-    pool = sorted(by_pos_c[pos_c], key=lambda g: (g["Player"] or "").lower())
+    by_pos_c = get_pools_cached(season_id, min_min_c, aggs, team_id_to_name)
+    pool = by_pos_c[pos_c]
     n_pos = len(pool)
-    if n_pos < SMALL_SAMPLE_N and n_pos > 0:
+    if 0 < n_pos < SMALL_SAMPLE_N:
         st.warning(T["small_sample"].format(n=n_pos))
 
+    teams_in_pos = sorted({str(g["Team"]) for g in pool if g.get("Team")})
     if len(pool) < 2:
         st.warning(T["no_compare"])
     else:
-        labels = [
-            f"{g['Player']} · {g['Team']} · {g['Minutes']}′" for g in pool
-        ]
         a_col, b_col = st.columns(2)
         with a_col:
-            choice_a = st.selectbox(T["player_a"], labels, key="cmp_player_a")
+            team_a = st.selectbox(
+                T["team_a"], [T["all_teams"]] + teams_in_pos, key="cmp_team_a"
+            )
+            pool_a = (
+                pool
+                if team_a == T["all_teams"]
+                else [g for g in pool if g["Team"] == team_a]
+            )
+            pool_a = sorted(pool_a, key=lambda g: (g["Player"] or "").lower())
+            labels_a = [
+                f"{g['Player']} · {g['Team']} · {g['Minutes']}′" for g in pool_a
+            ]
+            if not labels_a:
+                st.warning(T["no_players"])
+                sel_a = None
+            else:
+                choice_a = st.selectbox(T["player_a"], labels_a, key="cmp_player_a")
+                sel_a = pool_a[labels_a.index(choice_a)]
+
         with b_col:
-            labels_b = [x for x in labels if x != choice_a] or labels
-            choice_b = st.selectbox(T["player_b"], labels_b, key="cmp_player_b")
-
-        sel_a = pool[labels.index(choice_a)]
-        sel_b = pool[labels.index(choice_b)] if choice_b in labels else pool[0]
-        if player_key(sel_a) == player_key(sel_b):
-            st.info("Select two different players." if is_en else "別の選手を選んでください。")
-        else:
-            mdefs = POSITION_METRICS[pos_c]
-            radar_labels = [m["label"] for m in mdefs]
-            values_a = [sel_a.get("pct", {}).get(m["key"]) or 0 for m in mdefs]
-            values_b = [sel_b.get("pct", {}).get(m["key"]) or 0 for m in mdefs]
-
-            club_uri = None
-            url = team_id_to_logo.get(sel_a.get("TeamId"))
-            if url:
-                club_uri = fetch_image_data_uri(url)
-
-            sample_line = f"{pos_c}, ≥{int(min_min_c)}′ (n={n_pos})"
-            footnotes = [
-                f"Overlay = percentile · Ring = 100 · {sample_line}",
-                f"Navy = {sel_a['Player']} · Orange = {sel_b['Player']}",
-                "Same position only · Numbers in table below",
-                f"Superliga {season_name} · Superliga Radar · @Dalaprospect",
-            ]
-            title_lines = [
-                f"{sel_a['Player']}  vs  {sel_b['Player']}",
-                f"{pos_c} · Superliga {season_name}",
-                "Percentile comparison",
-            ]
-            st.markdown(f"##### {T['radar']}")
-            fig = build_radar_figure(
-                radar_labels,
-                values_a,
-                title_lines,
-                footnotes,
-                display_texts=None,
-                values_b=values_b,
-                name_a=sel_a["Player"],
-                name_b=sel_b["Player"],
-                marker_colors_a=None,
-                club_logo_uri=club_uri,
+            team_b = st.selectbox(
+                T["team_b"], [T["all_teams"]] + teams_in_pos, key="cmp_team_b"
             )
-            render_png(
-                fig,
-                f"{sel_a['Player'].replace(' ', '_')}_vs_{sel_b['Player'].replace(' ', '_')}",
+            pool_b = (
+                pool
+                if team_b == T["all_teams"]
+                else [g for g in pool if g["Team"] == team_b]
             )
+            pool_b = sorted(pool_b, key=lambda g: (g["Player"] or "").lower())
+            labels_b = [
+                f"{g['Player']} · {g['Team']} · {g['Minutes']}′" for g in pool_b
+            ]
+            if not labels_b:
+                st.warning(T["no_players"])
+                sel_b = None
+            else:
+                choice_b = st.selectbox(T["player_b"], labels_b, key="cmp_player_b")
+                sel_b = pool_b[labels_b.index(choice_b)]
 
-            st.markdown(f"##### {T['stats']}")
-            na, nb = short_name(sel_a["Player"]), short_name(sel_b["Player"])
-            rows = []
-            for m in mdefs:
-                rows.append(
-                    {
-                        "Metric": m["label"],
-                        f"{na} Per90/%": fmt_num(
-                            sel_a["metrics"].get(m["key"]), "per90"
-                        ),
-                        f"{na} %ile": fmt_num(
-                            sel_a.get("pct", {}).get(m["key"]), "pct"
-                        ),
-                        f"{nb} Per90/%": fmt_num(
-                            sel_b["metrics"].get(m["key"]), "per90"
-                        ),
-                        f"{nb} %ile": fmt_num(
-                            sel_b.get("pct", {}).get(m["key"]), "pct"
-                        ),
-                    }
+        if sel_a is not None and sel_b is not None:
+            if player_key(sel_a) == player_key(sel_b):
+                st.info(
+                    "Select two different players."
+                    if is_en
+                    else "別の選手を選んでください。"
                 )
-            df = pd.DataFrame(rows)
-            pct_cols = [c for c in df.columns if "%ile" in c]
-            st.dataframe(
-                df.style.map(style_percentile_col, subset=pct_cols),
-                use_container_width=True,
-                hide_index=True,
-            )
+            else:
+                mdefs = POSITION_METRICS[pos_c]
+                radar_labels = [m["label"] for m in mdefs]
+                values_a = [sel_a.get("pct", {}).get(m["key"]) or 0 for m in mdefs]
+                values_b = [sel_b.get("pct", {}).get(m["key"]) or 0 for m in mdefs]
+                sample_line = f"{pos_c}, ≥{int(min_min_c)}′ (n={n_pos})"
+                footnotes = [
+                    f"Overlay = percentile · Ring = 100 · {sample_line}",
+                    f"Navy = {sel_a['Player']} · Orange = {sel_b['Player']}",
+                    "Same position only · Numbers in table below",
+                    f"Superliga {season_name} · Superliga Radar · @Dalaprospect",
+                ]
+                title_lines = [
+                    f"{sel_a['Player']}  vs  {sel_b['Player']}",
+                    f"{pos_c} · Superliga {season_name}",
+                    "Percentile comparison",
+                ]
+                st.markdown(f"##### {T['radar']}")
+                # 比較時はクラブロゴなし（タイトル被り防止）
+                fig = build_radar_figure(
+                    radar_labels,
+                    values_a,
+                    title_lines,
+                    footnotes,
+                    display_texts=None,
+                    values_b=values_b,
+                    name_a=sel_a["Player"],
+                    name_b=sel_b["Player"],
+                    marker_colors_a=None,
+                    club_logo_uri=None,
+                )
+                render_png(
+                    fig,
+                    f"{sel_a['Player'].replace(' ', '_')}_vs_{sel_b['Player'].replace(' ', '_')}",
+                )
 
-# -------------------- TAB: DISCOVER --------------------
+                st.markdown(f"##### {T['stats']}")
+                na, nb = short_name(sel_a["Player"]), short_name(sel_b["Player"])
+                rows = []
+                for m in mdefs:
+                    rows.append(
+                        {
+                            "Metric": m["label"],
+                            f"{na} Per90/%": fmt_num(
+                                sel_a["metrics"].get(m["key"]), "per90"
+                            ),
+                            f"{na} %ile": fmt_num(
+                                sel_a.get("pct", {}).get(m["key"]), "pct"
+                            ),
+                            f"{nb} Per90/%": fmt_num(
+                                sel_b["metrics"].get(m["key"]), "per90"
+                            ),
+                            f"{nb} %ile": fmt_num(
+                                sel_b.get("pct", {}).get(m["key"]), "pct"
+                            ),
+                        }
+                    )
+                df = pd.DataFrame(rows)
+                pct_cols = [c for c in df.columns if "%ile" in c]
+                st.dataframe(
+                    df.style.map(style_percentile_col, subset=pct_cols),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+# -------------------- DISCOVER --------------------
 with tab_discover:
     st.caption(T["discover_hint"])
     d1, d2, d3 = st.columns(3)
@@ -1423,7 +1467,7 @@ with tab_discover:
         min_min_d = st.selectbox(
             T["min_minutes"], [0, 300, 600, 900], index=1, key="disc_min"
         )
-    by_pos_d = build_position_pools(aggs, team_id_to_name, min_min_d)
+    by_pos_d = get_pools_cached(season_id, min_min_d, aggs, team_id_to_name)
     pool_d = by_pos_d[pos_d]
     teams_d = sorted({str(g["Team"]) for g in pool_d if g.get("Team")})
     with d3:
@@ -1439,7 +1483,7 @@ with tab_discover:
 
     mdefs = POSITION_METRICS[pos_d]
     st.markdown(f"##### {T['metric_filters']}")
-    active_filters = []  # list of (metric_def, min_pct)
+    active_filters = []
     for m in mdefs:
         cols = st.columns([2, 1, 2])
         with cols[0]:
@@ -1481,7 +1525,6 @@ with tab_discover:
         if not results:
             st.warning(T["no_results"])
         else:
-            # 先頭フィルタの%ile降順
             sort_key = active_filters[0][0]["key"]
             results.sort(
                 key=lambda g: g.get("pct", {}).get(sort_key) or 0, reverse=True
@@ -1495,9 +1538,7 @@ with tab_discover:
                     "Minutes": g["Minutes"],
                 }
                 for m, _thr in active_filters:
-                    row[m["label"]] = fmt_num(
-                        g["metrics"].get(m["key"]), "per90"
-                    )
+                    row[m["label"]] = fmt_num(g["metrics"].get(m["key"]), "per90")
                     row[f"{m['label']} %ile"] = fmt_num(
                         g.get("pct", {}).get(m["key"]), "pct"
                     )
@@ -1514,12 +1555,11 @@ with tab_discover:
             else:
                 st.dataframe(df, use_container_width=True, hide_index=True)
             st.caption(
-                "Open Player Radar tab and select a player to view the full radar."
+                "Open Player Radar tab to view the full radar."
                 if is_en
                 else "詳細は Player Radar タブで選手を選んで確認できます。"
             )
 
-# ===== Data maintenance =====
 with st.expander(T["method_title"], expanded=False):
     st.markdown(
         "形=Percentile · 頂点色=帯（単体） · 比較=紺/オレンジ · Discover=同じ母集団"
@@ -1538,6 +1578,8 @@ with st.expander(T["admin_title"], expanded=False):
             st.session_state.fx_status = status2
             st.session_state.fx_errors = errors2
             st.session_state.loaded_season_id = season_id
+            st.session_state.pop("pools_data", None)
+            st.session_state.pop("_pools_key", None)
             st.rerun()
     st.write(
         {
