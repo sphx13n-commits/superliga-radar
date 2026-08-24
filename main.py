@@ -89,6 +89,13 @@ def fmt_radar_label(v, is_ratio=False):
     return s.rstrip("0").rstrip(".") or "0"
 
 
+def short_name(name, n=14):
+    if not name:
+        return "—"
+    name = str(name)
+    return name if len(name) <= n else name[: n - 1] + "…"
+
+
 POSITION_METRICS = {
     "GK": [
         {"key": "saves_p90", "label": "Saves/90", "tid": 57, "kind": "per90"},
@@ -178,7 +185,7 @@ T = {
     "pct_body": (
         "Same-position ranking 0–100 under the minute filter.\n\n"
         "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30\n\n"
-        "Shape = percentile · Vertex color = band (single) · Bold ring = 100 · Labels = Per90."
+        "Shape = percentile · Vertex color = band (single view) · Bold ring = 100 · Labels = Per90."
         if is_en
         else "同ポジション・出場時間条件での順位（0–100）。\n\n"
         "帯: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満\n\n"
@@ -195,9 +202,9 @@ T = {
         else "⚠ 母集団が小さいです（n={n}）。Percentileは参考値として見てください。"
     ),
     "band_legend": (
-        "Elite 90+ · Strong 70–89 · Average 30–69 · Below <30"
+        "Vertex color (single): Elite 90+ · Strong 70–89 · Average 30–69 · Below <30"
         if is_en
-        else "Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満"
+        else "頂点色（単体）: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満"
     ),
     "method_title": "Data & methodology" if is_en else "データと計算方法",
     "admin_title": "Data maintenance" if is_en else "データメンテナンス",
@@ -310,6 +317,30 @@ def get_logo_data_uri():
     return f"data:image/png;base64,{base64.b64encode(p.read_bytes()).decode('ascii')}"
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def fetch_image_data_uri(url: str):
+    """外部ロゴURLを data URI 化（PNG出力でも安定させる）"""
+    if not url or not isinstance(url, str):
+        return None
+    try:
+        r = requests.get(url, timeout=12)
+        if r.status_code != 200 or not r.content:
+            return None
+        ctype = (r.headers.get("Content-Type") or "image/png").split(";")[0].strip()
+        if "png" in ctype:
+            mime = "image/png"
+        elif "jpeg" in ctype or "jpg" in ctype:
+            mime = "image/jpeg"
+        elif "svg" in ctype:
+            mime = "image/svg+xml"
+        else:
+            mime = "image/png"
+        b64 = base64.b64encode(r.content).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+    except Exception:
+        return None
+
+
 def format_updated_at(iso_str):
     if not iso_str:
         return "—"
@@ -351,17 +382,12 @@ def build_radar_figure(
     name_a=None,
     name_b=None,
     marker_colors_a=None,
+    club_logo_uri=None,
 ):
-    """
-    単体: 頂点 = 帯色
-    比較: A=紺 / B=オレンジ
-    太い線 = Percentile 100
-    """
     fig = go.Figure()
     n = len(labels)
     theta = labels + [labels[0]]
 
-    # 単体のみ帯色。比較時は紺固定
     if marker_colors_a and values_b is None:
         m_colors = list(marker_colors_a) + [marker_colors_a[0]]
     else:
@@ -406,7 +432,6 @@ def build_radar_figure(
             )
         )
 
-    # 100 境界（カテゴリ軸）
     fig.add_trace(
         go.Scatterpolar(
             r=[100.0] * (n + 1),
@@ -418,7 +443,6 @@ def build_radar_figure(
         )
     )
 
-    # 単体のみ Per90
     if values_b is None and display_texts is not None:
         OUTER_R = 108
         fig.add_trace(
@@ -508,11 +532,30 @@ def build_radar_figure(
     )
 
     images = []
-    logo = get_logo_data_uri()
-    if logo:
+    # クラブロゴ（左上）
+    if club_logo_uri:
         images.append(
             {
-                "source": logo,
+                "source": club_logo_uri,
+                "xref": "paper",
+                "yref": "paper",
+                "x": 0.04,
+                "y": 0.96,
+                "sizex": 0.09,
+                "sizey": 0.09,
+                "xanchor": "left",
+                "yanchor": "top",
+                "sizing": "contain",
+                "layer": "above",
+            }
+        )
+
+    # @Dalaprospect ロゴ（右下）
+    brand = get_logo_data_uri()
+    if brand:
+        images.append(
+            {
+                "source": brand,
                 "xref": "paper",
                 "yref": "paper",
                 "x": 0.97,
@@ -672,11 +715,17 @@ teams_res = requests.get(
     timeout=30,
 )
 teams = teams_res.json().get("data", []) if teams_res.status_code == 200 else []
-team_id_to_name = {
-    t.get("id"): (t.get("name") or str(t.get("id")))
-    for t in teams
-    if t.get("id") is not None
-}
+team_id_to_name = {}
+team_id_to_logo = {}
+for t in teams:
+    tid = t.get("id")
+    if tid is None:
+        continue
+    team_id_to_name[tid] = t.get("name") or str(tid)
+    # Sportmonks: image_path が多い
+    logo = t.get("image_path") or t.get("logo_path") or t.get("image")
+    if logo:
+        team_id_to_logo[tid] = logo
 
 
 def _paginate_fixtures_window(start, end, filter_str=None):
@@ -1060,6 +1109,7 @@ else:
             {
                 "Player": a["player_name"] or f"id:{a['player_id']}",
                 "Team": team_name,
+                "TeamId": a["team_id"],
                 "Pos": pos,
                 "Minutes": int(round(mins)),
                 "Apps": a["apps"],
@@ -1140,15 +1190,27 @@ else:
                 choice_b = st.selectbox(T["player_b"], labels_b, key="player_b")
                 selected_b = peers[labels_b.index(choice_b)]
 
+        # クラブロゴ（選手Aのチーム）
+        club_logo_url = team_id_to_logo.get(selected_a.get("TeamId"))
+        club_logo_uri = fetch_image_data_uri(club_logo_url) if club_logo_url else None
+
         if selected_b is None:
+            logo_html = (
+                f'<img src="{club_logo_uri}" style="height:36px;width:36px;object-fit:contain;margin-right:10px;vertical-align:middle;" />'
+                if club_logo_uri
+                else ""
+            )
             st.markdown(
                 f"""
-                <div style="border:1px solid #D7E0EC;border-radius:12px;padding:14px 16px;margin:8px 0 14px;background:#F8FAFC;">
-                  <div style="font-size:22px;font-weight:750;color:{NAVY};">{selected_a['Player']}</div>
-                  <div style="margin-top:6px;color:#334155;font-size:14px;">
-                    {selected_a['Team']} · <b>{pos}</b> · {selected_a['Minutes']} min · {T['apps']} {selected_a['Apps']}
+                <div style="border:1px solid #D7E0EC;border-radius:12px;padding:14px 16px;margin:8px 0 14px;background:#F8FAFC;display:flex;align-items:center;">
+                  {logo_html}
+                  <div>
+                    <div style="font-size:22px;font-weight:750;color:{NAVY};">{selected_a['Player']}</div>
+                    <div style="margin-top:6px;color:#334155;font-size:14px;">
+                      {selected_a['Team']} · <b>{pos}</b> · {selected_a['Minutes']} min · {T['apps']} {selected_a['Apps']}
+                    </div>
+                    <div style="margin-top:4px;color:#64748B;font-size:12px;">Superliga {season_name}</div>
                   </div>
-                  <div style="margin-top:4px;color:#64748B;font-size:12px;">Superliga {season_name}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1211,7 +1273,7 @@ else:
 
         if selected_b is None:
             footnotes = [
-                f"Shape = percentile (0–100) · Vertex = band · Bold ring = 100 · Labels = Per90/% · {sample_line}",
+                f"Shape = percentile (0–100) · Vertex color = band · Bold ring = 100 · Labels = Per90/% · {sample_line}",
                 "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30",
                 "Per90 uses Minutes Played · Fixture aggregate",
                 f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
@@ -1229,6 +1291,7 @@ else:
                 display_texts=display_a,
                 name_a=selected_a["Player"],
                 marker_colors_a=marker_colors_a,
+                club_logo_uri=club_logo_uri,
             )
         else:
             footnotes = [
@@ -1252,6 +1315,7 @@ else:
                 name_a=selected_a["Player"],
                 name_b=selected_b["Player"],
                 marker_colors_a=None,
+                club_logo_uri=club_logo_uri,
             )
 
         try:
@@ -1271,19 +1335,18 @@ else:
             st.warning(str(e))
 
         st.markdown(f"##### {T['stats']}")
+        na = short_name(selected_a["Player"])
+        nb = short_name(selected_b["Player"]) if selected_b is not None else None
         rows = []
         for m in mdefs:
             row = {"Metric": m["label"]}
-            row["A Per90/%"] = fmt_num(selected_a["metrics"].get(m["key"]), "per90")
-            row["A %ile"] = fmt_num(selected_a.get("pct", {}).get(m["key"]), "pct")
-            if selected_b is not None:
-                row["B Per90/%"] = fmt_num(
-                    selected_b["metrics"].get(m["key"]), "per90"
+            if selected_b is None:
+                row[f"{na} Per90/%"] = fmt_num(
+                    selected_a["metrics"].get(m["key"]), "per90"
                 )
-                row["B %ile"] = fmt_num(
-                    selected_b.get("pct", {}).get(m["key"]), "pct"
+                row[f"{na} %ile"] = fmt_num(
+                    selected_a.get("pct", {}).get(m["key"]), "pct"
                 )
-            else:
                 raw_v = (
                     selected_a["raw"].get(m["tid"], 0)
                     if m["kind"] in ("per90", "lower_better_per90")
@@ -1299,6 +1362,19 @@ else:
                     selected_a.get("pct", {}).get(m["key"])
                 )
                 row["Band"] = band_name
+            else:
+                row[f"{na} Per90/%"] = fmt_num(
+                    selected_a["metrics"].get(m["key"]), "per90"
+                )
+                row[f"{na} %ile"] = fmt_num(
+                    selected_a.get("pct", {}).get(m["key"]), "pct"
+                )
+                row[f"{nb} Per90/%"] = fmt_num(
+                    selected_b["metrics"].get(m["key"]), "per90"
+                )
+                row[f"{nb} %ile"] = fmt_num(
+                    selected_b.get("pct", {}).get(m["key"]), "pct"
+                )
             rows.append(row)
 
         df = pd.DataFrame(rows)
@@ -1314,9 +1390,9 @@ else:
 
 with st.expander(T["method_title"], expanded=False):
     st.markdown(
-        "単体: 頂点色=帯 · 比較: 紺/オレンジ · 形=Percentile · 太い円=100"
+        "単体: 頂点色=帯 · 比較: 紺/オレンジ · 形=Percentile · 太い円=100 · クラブロゴ表示"
         if not is_en
-        else "Single: vertex=band color · Compare: navy/orange · Shape=percentile · Bold ring=100"
+        else "Single: vertex=band · Compare: navy/orange · Shape=percentile · Bold ring=100 · Club logo"
     )
 
 with st.expander(T["admin_title"], expanded=False):
