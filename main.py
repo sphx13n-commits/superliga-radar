@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 NAVY = "#0B1F3A"
-NAVY_SOFT = "rgba(11, 31, 58, 0.36)"
+NAVY_SOFT = "rgba(11, 31, 58, 0.28)"
 GRID = "#B8C7D9"
 AXIS = "#6B82A0"
 BG = "#EEF2F7"
@@ -27,12 +27,12 @@ LEAGUE_ID = 271
 CACHE_ROOT = Path(__file__).with_name("cache") / "superliga"
 POSITION_MAP = {24: "GK", 25: "DEF", 26: "MID", 27: "FWD"}
 MAX_BETWEEN_DAYS = 90
-MAX_SEASONS = 3  # 選択肢は直近3シーズンのみ
+MAX_SEASONS = 3
 
-BAND_ELITE = "#5C7A9A"
-BAND_STRONG = "#8BB0F5"
-BAND_AVG = "#C5D0DE"
-BAND_BELOW = "#E4E9F0"
+BAND_ELITE = "#1B4F72"
+BAND_STRONG = "#5B8DEF"
+BAND_AVG = "#A8B8CC"
+BAND_BELOW = "#D5DCE6"
 
 
 def percentile_band(p):
@@ -176,15 +176,14 @@ T = {
         "Shows how the player ranks against others in the **same position** "
         "who meet the selected minimum-minute threshold (0–100).\n\n"
         "**Bands:** Elite 90–100 · Strong 70–89 · Average 30–69 · Below 0–29\n\n"
-        "Higher is better, except **Goals Conceded/90** and **Fouls/90** "
-        "(lower raw → higher percentile).\n\n"
-        "Radar **shape** = percentile · vertex **labels** = Per90 (or %)."
+        "Higher is better, except **Goals Conceded/90** and **Fouls/90**.\n\n"
+        "Bars & shape = percentile · labels = Per90 (or %)."
         if is_en
         else "選択した最低出場時間を満たす**同ポジション**の選手を母集団として、"
         "位置を 0–100 で示します。\n\n"
         "**帯:** Elite 90–100 · Strong 70–89 · Average 30–69 · Below 0–29\n\n"
         "基本は高いほど良いですが、**失点/90・ファウル/90**は少ないほど高Percentileです。\n\n"
-        "レーダーの**形** = Percentile · 頂点の**数字** = Per90（または%）。"
+        "扇バー＆形 = Percentile · 数字 = Per90（または%）。"
     ),
     "early_note": (
         "Early season: small samples make percentiles more volatile."
@@ -344,40 +343,67 @@ def _date_chunks(start_s, end_s, max_days=MAX_BETWEEN_DAYS):
 
 
 def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, display_texts):
-    r_poly = values + [values[0]]
-    theta = labels + [labels[0]]
-    colors_closed = marker_colors + [marker_colors[0]]
-
-    OUTER_R = 108
-    r_text = [OUTER_R] * len(values)
-    r_text_closed = r_text + [r_text[0]]
-    text_closed = list(display_texts) + [display_texts[0]]
+    """
+    ハイブリッド:
+    - Barpolar（扇）: Percentile + 帯色 → 一目で強弱
+    - Scatterpolar（ポリゴン）: タイプのシルエット
+    - 外側テキスト: Per90 / %
+    """
+    n = max(len(labels), 1)
+    bar_width = max(18.0, min(32.0, 280.0 / n))
 
     fig = go.Figure()
+
+    # 1) 扇バー（Percentile）
+    fig.add_trace(
+        go.Barpolar(
+            r=values,
+            theta=labels,
+            marker={
+                "color": marker_colors,
+                "line": {"color": WHITE, "width": 1.2},
+            },
+            opacity=0.82,
+            width=[bar_width] * n,
+            hovertemplate="%{theta}: %{r:.0f} pctile<extra></extra>",
+            base=0,
+        )
+    )
+
+    # 2) ポリゴン（シルエット）
+    r_poly = values + [values[0]]
+    theta_closed = labels + [labels[0]]
+    colors_closed = marker_colors + [marker_colors[0]]
     fig.add_trace(
         go.Scatterpolar(
             r=r_poly,
-            theta=theta,
+            theta=theta_closed,
             fill="toself",
             fillcolor=NAVY_SOFT,
-            line={"color": NAVY, "width": 3.8},
+            line={"color": NAVY, "width": 2.8},
             marker={
                 "color": colors_closed,
-                "size": 18,
-                "line": {"color": NAVY, "width": 1.6},
+                "size": 14,
+                "line": {"color": WHITE, "width": 1.4},
             },
             mode="lines+markers",
-            hovertemplate="%{theta}: %{r:.0f} pctile<extra></extra>",
+            hoverinfo="skip",
         )
     )
+
+    # 3) Per90 ラベル（外側固定）
+    OUTER_R = 112
+    r_text = [OUTER_R] * n
+    r_text_closed = r_text + [r_text[0]]
+    text_closed = list(display_texts) + [display_texts[0]]
     fig.add_trace(
         go.Scatterpolar(
             r=r_text_closed,
-            theta=theta,
+            theta=theta_closed,
             mode="text",
             text=text_closed,
             textfont={
-                "size": 20,
+                "size": 18,
                 "color": NAVY,
                 "family": "Arial Black, Arial, sans-serif",
             },
@@ -386,8 +412,8 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, di
     )
 
     annotations = []
-    title_sizes = [48, 22, 17]
-    title_ys = [0.985, 0.935, 0.900]
+    title_sizes = [46, 21, 16]
+    title_ys = [0.985, 0.938, 0.905]
     for i, line in enumerate(title_lines):
         annotations.append(
             {
@@ -401,11 +427,32 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, di
                 "showarrow": False,
                 "font": {
                     "color": NAVY,
-                    "size": title_sizes[i] if i < len(title_sizes) else 16,
+                    "size": title_sizes[i] if i < len(title_sizes) else 15,
                     "family": "Arial",
                 },
             }
         )
+
+    # 帯凡例（色付き）
+    legend_html = (
+        f"<span style='color:{BAND_ELITE}'><b>■ Elite 90+</b></span>　"
+        f"<span style='color:{BAND_STRONG}'><b>■ Strong 70–89</b></span>　"
+        f"<span style='color:{BAND_AVG}'><b>■ Average 30–69</b></span>　"
+        f"<span style='color:#8A96A8'><b>■ Below &lt;30</b></span>"
+    )
+    annotations.append(
+        {
+            "text": legend_html,
+            "xref": "paper",
+            "yref": "paper",
+            "x": 0.5,
+            "y": 0.145,
+            "xanchor": "center",
+            "yanchor": "top",
+            "showarrow": False,
+            "font": {"size": 13, "family": "Arial"},
+        }
+    )
 
     base_y = 0.108
     for i, line in enumerate(footnotes or []):
@@ -415,11 +462,11 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, di
                 "xref": "paper",
                 "yref": "paper",
                 "x": 0.03,
-                "y": base_y - i * 0.026,
+                "y": base_y - i * 0.024,
                 "xanchor": "left",
                 "yanchor": "top",
                 "showarrow": False,
-                "font": {"color": "#374151", "size": 15, "family": "Arial"},
+                "font": {"color": "#374151", "size": 13, "family": "Arial"},
             }
         )
 
@@ -459,34 +506,35 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, di
     fig.update_layout(
         height=1500,
         width=1200,
-        margin={"l": 120, "r": 120, "t": 160, "b": 170},
+        margin={"l": 120, "r": 120, "t": 155, "b": 175},
         paper_bgcolor=WHITE,
         plot_bgcolor=WHITE,
         showlegend=False,
         images=images,
         annotations=annotations,
         polar={
-            "domain": {"x": [0.15, 0.85], "y": [0.18, 0.80]},
+            "domain": {"x": [0.14, 0.86], "y": [0.19, 0.80]},
             "bgcolor": BG,
             "radialaxis": {
                 "visible": True,
                 "range": [0, 122],
-                "tickvals": [0, 20, 40, 60, 80, 100],
+                "tickvals": [0, 25, 50, 75, 100],
                 "gridcolor": GRID,
                 "linecolor": AXIS,
-                "tickfont": {"color": AXIS, "size": 14},
+                "tickfont": {"color": AXIS, "size": 12},
             },
             "angularaxis": {
                 "gridcolor": GRID,
                 "linecolor": AXIS,
                 "tickfont": {
                     "color": NAVY,
-                    "size": 14,
+                    "size": 13,
                     "family": "Arial",
                 },
                 "rotation": 90,
                 "direction": "clockwise",
             },
+            "bargap": 0.15,
         },
     )
     return fig
@@ -537,7 +585,6 @@ def style_percentile_col(val):
     return f"background-color: {color}; color: {text}; font-weight: 700;"
 
 
-# ----- season list（直近 MAX_SEASONS のみ） -----
 league_res = requests.get(
     f"{base_url}/leagues/{LEAGUE_ID}",
     headers=headers,
@@ -556,7 +603,6 @@ season_records = [
 if not season_records and current_season.get("id"):
     season_records = [current_season]
 
-# 新しい順（現在シーズン優先 → starting_at 新しい順）
 season_records.sort(
     key=lambda s: (
         s.get("id") == current_season.get("id"),
@@ -564,7 +610,6 @@ season_records.sort(
     ),
     reverse=True,
 )
-# 直近 N シーズンだけ残す
 season_records = season_records[:MAX_SEASONS]
 
 season_options = {s["name"]: s["id"] for s in season_records}
@@ -624,7 +669,6 @@ def _paginate_fixtures_window(start, end, filter_str=None):
         }
         if filter_str:
             req_params["filters"] = filter_str
-
         res = requests.get(
             f"{base_url}/fixtures/between/{start}/{end}",
             headers=headers,
@@ -659,7 +703,6 @@ def _fetch_between_chunked(start_s, end_s, filter_str=None):
     windows = []
     last_status = None
     last_error_body = None
-
     for w_start, w_end in chunks:
         fx, err, status, body = _paginate_fixtures_window(w_start, w_end, filter_str)
         last_status = status
@@ -685,7 +728,6 @@ def _fetch_between_chunked(start_s, end_s, filter_str=None):
             }
         )
         time.sleep(0.05)
-
     return all_fx, total_errors, last_status, last_error_body, windows
 
 
@@ -696,7 +738,6 @@ def fetch_season_fixtures_list(sid, season_meta_row):
         start = "2024-07-01"
     if not end:
         end = "2027-06-30"
-
     today = date.today().isoformat()
     wide_start = start
     wide_end = min(end, today) if end else today
@@ -988,7 +1029,6 @@ def incremental_update(sid, season_meta_row, force_all=False):
         or restore_aggs_from_file(sid)[0] is None
         or finished_count == 0
     )
-
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     if not need_rebuild and agg_path.exists():
@@ -1197,7 +1237,7 @@ else:
             )
 
         footnotes = [
-            f"Shape = percentile (0–100) · Labels = Per90 (or %) · Sample: {pos}, ≥{int(min_min)} min (n={n_pos})",
+            f"Bars & shape = percentile · Labels = Per90/% · Sample: {pos}, ≥{int(min_min)} min (n={n_pos})",
             "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30  |  Conceded/Fouls inverted",
             "Per90 uses Minutes Played · Pass Acc = Σ accurate ÷ Σ passes · Fixture aggregate",
             f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
@@ -1218,14 +1258,7 @@ else:
         try:
             png = fig.to_image(format="png", width=1200, height=1500, scale=2)
             st.image(png, use_container_width=True)
-            st.caption(
-                T["band_legend"]
-                + (
-                    " · Shape = percentile · Labels = Per90/%"
-                    if is_en
-                    else " · 形=Percentile · 数字=Per90/%"
-                )
-            )
+            st.caption(T["band_legend"] + (" · Bars=percentile · Labels=Per90/%" if is_en else " · 扇=Percentile · 数字=Per90/%"))
             st.download_button(
                 T["download"],
                 data=png,
@@ -1248,36 +1281,26 @@ with st.expander(T["method_title"], expanded=False):
         st.markdown(
             """
 **Data source**
-- Sportmonks Football API
-- Danish Superliga (league 271)
-- Fixture-level player statistics (`lineups.details`)
+- Sportmonks Football API · Superliga (271) · Fixture `lineups.details`
 
-**Methodology**
-- Minutes Played (type 119) as the Per90 denominator
-- Per90 = total ÷ minutes × 90
-- Pass accuracy = successful passes ÷ total passes
-- Comparisons within the same position
-- Radar **shape** = percentile · vertex **labels** = Per90 (or %)
+**Chart**
+- Colored polar bars + polygon silhouette = percentile
+- Outer labels = Per90 (or %)
             """
         )
     else:
         st.markdown(
             """
 **データソース**
-- Sportmonks Football API
-- デンマーク・スーペルリーガ（league 271）
-- 試合単位の選手スタッツ（`lineups.details`）
+- Sportmonks · Superliga · 試合単位 `lineups.details`
 
-**計算方法**
-- 出場時間は Minutes Played（type 119）を分母に使用
-- Per90 = 合計 ÷ 出場分 × 90
-- パス成功率 = 成功パス合計 ÷ パス合計
-- 比較は同じポジション内
-- レーダーの**形** = Percentile · 頂点の**数字** = Per90（または%）
+**チャート**
+- 色付き扇バー + ポリゴン = Percentile
+- 外側の数字 = Per90（または%）
             """
         )
 
-with st.expander(T["admin_title"], expanded=True):
+with st.expander(T["admin_title"], expanded=False):
     force_all = st.checkbox(T["force"], value=False)
     if st.button(T["update"], type="primary"):
         with st.spinner(T["updating"]):
@@ -1288,38 +1311,19 @@ with st.expander(T["admin_title"], expanded=True):
             st.session_state.fx_status = status2
             st.session_state.fx_errors = errors2
             st.session_state.loaded_season_id = season_id
-            if status2.get("finished_fixtures", 0) == 0:
-                st.warning(T["no_fixtures"])
-            elif status2.get("aggregate_rebuilt"):
-                st.success(
-                    f"{T['rebuild_ok']} · finished={status2.get('finished_fixtures', 0)} · "
-                    f"new={status2.get('new_fetched', 0)} · players={status2.get('players', 0)}"
-                )
-            else:
-                st.success(
-                    f"{T['skip_ok']} · players={status2.get('players', 0)}"
-                )
             st.rerun()
 
     st.markdown(f"**{T['status_title']}**")
     st.write(
         {
             "season_id": season_id,
-            "season_meta_start": status.get("season_meta_start"),
-            "season_meta_end": status.get("season_meta_end"),
             "finished_fixtures": status.get("finished_fixtures"),
             "total_fetched": status.get("total_fetched"),
-            "cached_fixtures": status.get("cached_fixtures"),
-            "new_fetched": status.get("new_fetched"),
-            "loaded_fixtures": status.get("loaded_fixtures") or status.get("fixtures"),
-            "aggregate_rebuilt": status.get("aggregate_rebuilt"),
             "players": status.get("players") or (len(aggs) if aggs else 0),
             "updated_at": status.get("updated_at"),
             "mode": status.get("mode"),
             "errors": status.get("errors")
             if status.get("errors") is not None
             else len(errors),
-            "list_errors": status.get("list_errors"),
-            "methods_tried": status.get("methods_tried"),
         }
     )
