@@ -1668,13 +1668,13 @@ with tab_similar:
             st.warning(T["no_similar"])
         else:
             rows = []
-            # 先頭: 基準選手
+            # 先頭: 基準選手（類似度は文字列整形）
             ref_row = {
                 "#": "★",
                 "Player": ref["Player"],
                 "Team": ref["Team"],
                 "Minutes": ref["Minutes"],
-                T["similarity"]: 100.0,
+                T["similarity"]: fmt_num(100, "pct"),
             }
             for m in mdefs[:4]:
                 ref_row[f"{m['label']} %ile"] = fmt_num(
@@ -1682,14 +1682,13 @@ with tab_similar:
                 )
             rows.append(ref_row)
 
-            # 2行目以降: 類似選手（1から）
             for rank, (sim, g) in enumerate(scored, start=1):
                 row = {
                     "#": rank,
                     "Player": g["Player"],
                     "Team": g["Team"],
                     "Minutes": g["Minutes"],
-                    T["similarity"]: sim,
+                    T["similarity"]: fmt_num(sim, "pct"),
                 }
                 for m in mdefs[:4]:
                     row[f"{m['label']} %ile"] = fmt_num(
