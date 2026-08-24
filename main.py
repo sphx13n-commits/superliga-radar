@@ -17,7 +17,6 @@ st.set_page_config(
     layout="centered",
 )
 
-# 初回表示・再読込時はページ先頭へ（途中表示防止）
 components.html(
     """
     <script>
@@ -249,6 +248,9 @@ T = {
     "results": "Results" if is_en else "検索結果",
     "no_results": "No players match the filters." if is_en else "条件に合う選手がいません。",
     "min_pct": "Min %ile" if is_en else "最低%ile",
+    "tab_radar": "⚽ Player Radar" if is_en else "⚽ 選手レーダー",
+    "tab_compare": "⚔️ Compare" if is_en else "⚔️ 選手比較",
+    "tab_discover": "🔍 Discover" if is_en else "🔍 探索",
 }
 
 st.markdown(
@@ -1201,7 +1203,7 @@ if not aggs:
     st.stop()
 
 tab_radar, tab_compare, tab_discover = st.tabs(
-    ["⚽ Player Radar", "⚔️ Compare", "🔍 Discover"]
+    [T["tab_radar"], T["tab_compare"], T["tab_discover"]]
 )
 
 # -------------------- RADAR --------------------
@@ -1581,12 +1583,12 @@ with tab_discover:
             st.caption(
                 "Open Player Radar tab to view the full radar."
                 if is_en
-                else "詳細は Player Radar タブで選手を選んで確認できます。"
+                else "詳細は 選手レーダー タブで選手を選んで確認できます。"
             )
 
 with st.expander(T["method_title"], expanded=False):
     st.markdown(
-        "形=Percentile · 頂点色=帯（単体） · 比較=紺/オレンジ · Discover=同じ母集団"
+        "形=Percentile · 頂点色=帯（単体） · 比較=紺/オレンジ · 探索=同じ母集団"
         if not is_en
         else "Shape=percentile · Vertex=band (single) · Compare=navy/orange · Discover=same pool"
     )
