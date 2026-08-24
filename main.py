@@ -162,9 +162,9 @@ T = {
     if is_en
     else "データがありません。下の「データメンテナンス」から取得してください。",
     "no_fixtures": (
-        "No finished fixtures found for this season. Try Update again, or check season dates."
+        "No finished fixtures found for this season. Check methods_tried / error_body in status."
         if is_en
-        else "このシーズンの終了試合が取得できませんでした。データ更新を再実行するか、別シーズンを試してください。"
+        else "このシーズンの終了試合が取得できませんでした。ステータスの methods_tried / error_body を確認してください。"
     ),
     "no_players": "No players match the filters. Try lowering minimum minutes."
     if is_en
@@ -558,7 +558,6 @@ season_id = season_options[selected_season_name]
 season_name = selected_season_name
 season_info = season_meta.get(season_id, {})
 
-# シーズン切替検知
 if st.session_state.get("loaded_season_id") != season_id:
     st.session_state.fx_aggs = None
     st.session_state.fx_status = None
@@ -579,25 +578,33 @@ team_id_to_name = {
 }
 
 
-def _paginate_fixtures(start, end, filter_str):
-    """fixtures/between をページング取得。"""
+def _paginate_fixtures(start, end, filter_str=None):
+    """fixtures/between をページング取得。エラー時は本文も返す。"""
     all_fx, page, errors = [], 1, 0
     last_status = None
+    error_body = None
     while True:
+        req_params = {
+            **params,
+            "include": "state;participants;scores",
+            "page": page,
+        }
+        if filter_str:
+            req_params["filters"] = filter_str
+
         res = requests.get(
             f"{base_url}/fixtures/between/{start}/{end}",
             headers=headers,
-            params={
-                **params,
-                "filters": filter_str,
-                "include": "state;participants;scores",
-                "page": page,
-            },
+            params=req_params,
             timeout=40,
         )
         last_status = res.status_code
         if res.status_code != 200:
             errors += 1
+            try:
+                error_body = res.json()
+            except Exception:
+                error_body = {"raw": (res.text or "")[:800]}
             break
         body = res.json() or {}
         chunk = body.get("data") or []
@@ -608,82 +615,116 @@ def _paginate_fixtures(start, end, filter_str):
         if page > 50:
             break
         time.sleep(0.06)
-    return all_fx, errors, last_status
+    return all_fx, errors, last_status, error_body
 
 
 def fetch_season_fixtures_list(sid, season_meta_row):
-    """
-    シーズンID優先でFixture一覧を取得。
-    1) fixtureSeasons:{sid}
-    2) fixtureLeagues:{LEAGUE_ID}（フォールバック）
-    """
+    """シーズンFixture一覧（診断情報付き）"""
     start = (season_meta_row.get("starting_at") or "")[:10]
     end = (season_meta_row.get("ending_at") or "")[:10]
     if not start:
         start = "2024-07-01"
     if not end:
         end = "2027-06-30"
-    # 終了日が未来なら今日までに制限（進行中シーズン用）
+
     today = date.today().isoformat()
-    end_capped = end if end <= today else today
-    # between は広めの方が取りこぼしにくい
     wide_start = start
     wide_end = end if end > today else today
     if wide_end < wide_start:
         wide_end = wide_start
 
     methods_tried = []
-    all_fx, errors, http_status = [], 0, None
+    all_fx, errors, http_status, err_body = [], 0, None, None
 
-    # Method A: シーズンID指定（本命）
-    fx_a, err_a, st_a = _paginate_fixtures(
+    # A: fixtureSeasons
+    fx_a, err_a, st_a, body_a = _paginate_fixtures(
         wide_start, wide_end, f"fixtureSeasons:{sid}"
     )
     methods_tried.append(
-        {"method": "fixtureSeasons", "count": len(fx_a), "errors": err_a, "http": st_a}
+        {
+            "method": "fixtureSeasons",
+            "filter": f"fixtureSeasons:{sid}",
+            "start": wide_start,
+            "end": wide_end,
+            "count": len(fx_a),
+            "errors": err_a,
+            "http": st_a,
+            "error_body": body_a,
+        }
     )
-    all_fx, errors, http_status = fx_a, err_a, st_a
+    all_fx, errors, http_status, err_body = fx_a, err_a, st_a, body_a
 
-    # Method B: リーグ指定フォールバック
+    # B: fixtureLeagues
     if len(all_fx) == 0:
-        fx_b, err_b, st_b = _paginate_fixtures(
+        fx_b, err_b, st_b, body_b = _paginate_fixtures(
             wide_start, wide_end, f"fixtureLeagues:{LEAGUE_ID}"
         )
         methods_tried.append(
             {
                 "method": "fixtureLeagues",
+                "filter": f"fixtureLeagues:{LEAGUE_ID}",
+                "start": wide_start,
+                "end": wide_end,
                 "count": len(fx_b),
                 "errors": err_b,
                 "http": st_b,
+                "error_body": body_b,
             }
         )
-        # シーズンIDで絞る（レスポンスに season_id がある場合）
         filtered = []
         for fx in fx_b:
-            fx_sid = (
-                fx.get("season_id")
-                or (fx.get("season") or {}).get("id")
-            )
+            fx_sid = fx.get("season_id") or (fx.get("season") or {}).get("id")
             if fx_sid is None or int(fx_sid) == int(sid):
                 filtered.append(fx)
-        # season_id が無いデータしかない場合はリーグ結果をそのまま使う
         all_fx = filtered if filtered else fx_b
         errors += err_b
         http_status = st_b
+        err_body = body_b
+
+    # C: filterなし between → season_id でクライアント絞り込み
+    if len(all_fx) == 0:
+        fx_c, err_c, st_c, body_c = _paginate_fixtures(
+            wide_start, wide_end, None
+        )
+        methods_tried.append(
+            {
+                "method": "between_no_filter",
+                "filter": None,
+                "start": wide_start,
+                "end": wide_end,
+                "count": len(fx_c),
+                "errors": err_c,
+                "http": st_c,
+                "error_body": body_c,
+            }
+        )
+        if fx_c:
+            filtered = []
+            for fx in fx_c:
+                fx_sid = fx.get("season_id") or (fx.get("season") or {}).get("id")
+                if fx_sid is not None and int(fx_sid) == int(sid):
+                    filtered.append(fx)
+            all_fx = filtered
+        errors += err_c
+        http_status = st_c
+        err_body = body_c
 
     finished = [fx for fx in all_fx if _is_finished_fixture(fx)]
-    # 終了判定が厳しすぎる場合の緩和: scores があるもの
     if len(finished) == 0 and len(all_fx) > 0:
         finished = [
             fx
             for fx in all_fx
-            if fx.get("scores") or fx.get("result_info") or fx.get("state_id") in (5, 7, 8)
+            if fx.get("scores")
+            or fx.get("result_info")
+            or fx.get("state_id") in (5, 7, 8)
         ]
 
     payload = {
         "season_id": sid,
         "start": wide_start,
         "end": wide_end,
+        "season_meta_start": (season_meta_row.get("starting_at") or "")[:10],
+        "season_meta_end": (season_meta_row.get("ending_at") or "")[:10],
         "total_fetched": len(all_fx),
         "finished_count": len(finished),
         "list_errors": errors,
@@ -923,6 +964,9 @@ def incremental_update(sid, season_meta_row, force_all=False):
                 "mode": "incremental_skip_rebuild",
                 "season_id": sid,
                 "methods_tried": flist.get("methods_tried"),
+                "list_errors": flist.get("list_errors"),
+                "season_meta_start": flist.get("season_meta_start"),
+                "season_meta_end": flist.get("season_meta_end"),
             }
             return aggs, status, errors
 
@@ -942,12 +986,13 @@ def incremental_update(sid, season_meta_row, force_all=False):
         "updated_at": now,
         "methods_tried": flist.get("methods_tried"),
         "list_errors": flist.get("list_errors"),
+        "season_meta_start": flist.get("season_meta_start"),
+        "season_meta_end": flist.get("season_meta_end"),
     }
     save_aggs(sid, aggs, status)
     return aggs, status, errors
 
 
-# ----- load selected season -----
 if st.session_state.get("fx_aggs") is None:
     with st.spinner(T["season_loading"]):
         aggs, meta = restore_aggs_from_file(season_id)
@@ -980,7 +1025,7 @@ st.caption(
 )
 
 if not aggs:
-    if (status.get("finished_fixtures") == 0) and (status.get("total_fetched") == 0):
+    if (status.get("finished_fixtures") == 0):
         st.warning(T["no_fixtures"])
     else:
         st.info(T["no_data"])
@@ -1171,8 +1216,6 @@ with st.expander(T["method_title"], expanded=False):
 - Comparisons within the same position
 - Percentile uses players above the selected minimum minutes
 - Radar **shape** = percentile · vertex **labels** = Per90 (or %)
-- Bands: Elite 90–100 · Strong 70–89 · Average 30–69 · Below 0–29
-- Goals conceded & fouls: lower is better (percentile inverted)
             """
         )
     else:
@@ -1190,8 +1233,6 @@ with st.expander(T["method_title"], expanded=False):
 - 比較は同じポジション内
 - Percentileは最低出場時間以上の選手のみが母集団
 - レーダーの**形** = Percentile · 頂点の**数字** = Per90（または%）
-- 帯: Elite 90–100 · Strong 70–89 · Average 30–69 · Below 0–29
-- 失点・ファウルは少ないほど高Percentile（反転）
             """
         )
 
@@ -1223,6 +1264,8 @@ with st.expander(T["admin_title"], expanded=True):
     st.write(
         {
             "season_id": season_id,
+            "season_meta_start": status.get("season_meta_start"),
+            "season_meta_end": status.get("season_meta_end"),
             "finished_fixtures": status.get("finished_fixtures"),
             "total_fetched": status.get("total_fetched"),
             "cached_fixtures": status.get("cached_fixtures"),
