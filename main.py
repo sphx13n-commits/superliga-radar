@@ -33,10 +33,11 @@ MAX_BETWEEN_DAYS = 90
 MAX_SEASONS = 3
 SMALL_SAMPLE_N = 15
 
-BAND_ELITE = "#5C7A9A"
-BAND_STRONG = "#8BB0F5"
-BAND_AVG = "#C5D0DE"
-BAND_BELOW = "#E4E9F0"
+# 頂点帯色（メリハリ重視）
+BAND_ELITE = "#0B1F3A"
+BAND_STRONG = "#2563EB"
+BAND_AVG = "#64748B"
+BAND_BELOW = "#CBD5E1"
 
 
 def percentile_band(p):
@@ -185,11 +186,11 @@ T = {
     "pct_body": (
         "Same-position ranking 0–100 under the minute filter.\n\n"
         "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30\n\n"
-        "Shape = percentile · Vertex color = band (single view) · Bold ring = 100 · Labels = Per90."
+        "Shape = percentile · Vertex color = band (single) · Bold ring = 100 · Labels = Per90."
         if is_en
         else "同ポジション・出場時間条件での順位（0–100）。\n\n"
         "帯: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満\n\n"
-        "形 = Percentile · 頂点色 = 帯（単体時） · 太い円 = 100 · 数字 = Per90。"
+        "形 = Percentile · 頂点色 = 帯（単体） · 太い円 = 100 · 数字 = Per90。"
     ),
     "early_note": (
         "Early season: overall sample is still building — treat percentiles as indicative."
@@ -202,7 +203,7 @@ T = {
         else "⚠ 母集団が小さいです（n={n}）。Percentileは参考値として見てください。"
     ),
     "band_legend": (
-        "Vertex color (single): Elite 90+ · Strong 70–89 · Average 30–69 · Below <30"
+        "Vertex (single): Elite 90+ · Strong 70–89 · Average 30–69 · Below <30"
         if is_en
         else "頂点色（単体）: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満"
     ),
@@ -319,7 +320,6 @@ def get_logo_data_uri():
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def fetch_image_data_uri(url: str):
-    """外部ロゴURLを data URI 化（PNG出力でも安定させる）"""
     if not url or not isinstance(url, str):
         return None
     try:
@@ -403,8 +403,8 @@ def build_radar_figure(
             line={"color": NAVY, "width": 3.4},
             marker={
                 "color": m_colors,
-                "size": 14,
-                "line": {"color": NAVY, "width": 1.4},
+                "size": 16,
+                "line": {"color": NAVY, "width": 1.8},
             },
             mode="lines+markers",
             name=name_a or "A",
@@ -423,7 +423,7 @@ def build_radar_figure(
                 line={"color": ACCENT, "width": 3.4},
                 marker={
                     "color": ACCENT,
-                    "size": 14,
+                    "size": 16,
                     "line": {"color": WHITE, "width": 1.2},
                 },
                 mode="lines+markers",
@@ -501,7 +501,8 @@ def build_radar_figure(
             }
         )
 
-    base_y = 0.110 if values_b is None else 0.100
+    # 脚注（短文・右ロゴと被りにくい）
+    base_y = 0.118 if values_b is None else 0.108
     for i, line in enumerate(footnotes or []):
         annotations.append(
             {
@@ -509,11 +510,11 @@ def build_radar_figure(
                 "xref": "paper",
                 "yref": "paper",
                 "x": 0.03,
-                "y": base_y - i * 0.024,
+                "y": base_y - i * 0.026,
                 "xanchor": "left",
                 "yanchor": "top",
                 "showarrow": False,
-                "font": {"color": "#374151", "size": 14, "family": "Arial"},
+                "font": {"color": "#374151", "size": 13, "family": "Arial"},
             }
         )
 
@@ -523,26 +524,25 @@ def build_radar_figure(
             "xref": "paper",
             "yref": "paper",
             "x": 0.97,
-            "y": 0.018,
+            "y": 0.012,
             "xanchor": "right",
             "yanchor": "bottom",
             "showarrow": False,
-            "font": {"color": NAVY, "size": 15, "family": "Arial"},
+            "font": {"color": NAVY, "size": 14, "family": "Arial"},
         }
     )
 
     images = []
-    # クラブロゴ（左上）
     if club_logo_uri:
         images.append(
             {
                 "source": club_logo_uri,
                 "xref": "paper",
                 "yref": "paper",
-                "x": 0.04,
-                "y": 0.96,
-                "sizex": 0.09,
-                "sizey": 0.09,
+                "x": 0.03,
+                "y": 0.97,
+                "sizex": 0.13,
+                "sizey": 0.13,
                 "xanchor": "left",
                 "yanchor": "top",
                 "sizing": "contain",
@@ -550,7 +550,6 @@ def build_radar_figure(
             }
         )
 
-    # @Dalaprospect ロゴ（右下）
     brand = get_logo_data_uri()
     if brand:
         images.append(
@@ -638,11 +637,11 @@ def style_percentile_col(val):
     if p >= 90:
         color, text = "#0B1F3A", "#FFFFFF"
     elif p >= 70:
-        color, text = "#2F6FED", "#FFFFFF"
+        color, text = "#2563EB", "#FFFFFF"
     elif p >= 30:
-        color, text = "#B7C4D6", NAVY
+        color, text = "#64748B", "#FFFFFF"
     else:
-        color, text = "#E6EBF2", NAVY
+        color, text = "#E2E8F0", NAVY
     return f"background-color: {color}; color: {text}; font-weight: 700;"
 
 
@@ -722,7 +721,6 @@ for t in teams:
     if tid is None:
         continue
     team_id_to_name[tid] = t.get("name") or str(tid)
-    # Sportmonks: image_path が多い
     logo = t.get("image_path") or t.get("logo_path") or t.get("image")
     if logo:
         team_id_to_logo[tid] = logo
@@ -1190,13 +1188,12 @@ else:
                 choice_b = st.selectbox(T["player_b"], labels_b, key="player_b")
                 selected_b = peers[labels_b.index(choice_b)]
 
-        # クラブロゴ（選手Aのチーム）
         club_logo_url = team_id_to_logo.get(selected_a.get("TeamId"))
         club_logo_uri = fetch_image_data_uri(club_logo_url) if club_logo_url else None
 
         if selected_b is None:
             logo_html = (
-                f'<img src="{club_logo_uri}" style="height:36px;width:36px;object-fit:contain;margin-right:10px;vertical-align:middle;" />'
+                f'<img src="{club_logo_uri}" style="height:40px;width:40px;object-fit:contain;margin-right:10px;vertical-align:middle;" />'
                 if club_logo_uri
                 else ""
             )
@@ -1267,16 +1264,16 @@ else:
         if selected_b is not None:
             values_b = [selected_b.get("pct", {}).get(m["key"]) or 0 for m in mdefs]
 
-        sample_line = f"Sample: {pos}, ≥{int(min_min)} min (n={n_pos})"
+        sample_line = f"{pos}, ≥{int(min_min)}′ (n={n_pos})"
         if is_small:
-            sample_line += " · ⚠ Small sample" if is_en else " · ⚠ 母集団小・参考値"
+            sample_line += " · ⚠ small" if is_en else " · ⚠ 母集団小"
 
         if selected_b is None:
             footnotes = [
-                f"Shape = percentile (0–100) · Vertex color = band · Bold ring = 100 · Labels = Per90/% · {sample_line}",
+                f"Shape = percentile · Vertex = band · Ring = 100 · {sample_line}",
                 "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30",
-                "Per90 uses Minutes Played · Fixture aggregate",
-                f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
+                "Per90 = Minutes Played · Fixture aggregate · Sportmonks",
+                f"Superliga {season_name} · Superliga Radar · @Dalaprospect",
             ]
             title_lines = [
                 selected_a["Player"],
@@ -1295,10 +1292,10 @@ else:
             )
         else:
             footnotes = [
-                f"Overlay = percentile (0–100) · Bold ring = 100 · {sample_line}",
+                f"Overlay = percentile · Ring = 100 · {sample_line}",
                 f"Navy = {selected_a['Player']} · Orange = {selected_b['Player']}",
                 "Same position only · Numbers in table below",
-                f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
+                f"Superliga {season_name} · Superliga Radar · @Dalaprospect",
             ]
             title_lines = [
                 f"{selected_a['Player']}  vs  {selected_b['Player']}",
@@ -1390,7 +1387,7 @@ else:
 
 with st.expander(T["method_title"], expanded=False):
     st.markdown(
-        "単体: 頂点色=帯 · 比較: 紺/オレンジ · 形=Percentile · 太い円=100 · クラブロゴ表示"
+        "単体: 頂点色=帯 · 比較: 紺/オレンジ · 形=Percentile · 太い円=100 · クラブロゴ"
         if not is_en
         else "Single: vertex=band · Compare: navy/orange · Shape=percentile · Bold ring=100 · Club logo"
     )
