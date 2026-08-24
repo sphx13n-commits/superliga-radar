@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 NAVY = "#0B1F3A"
-NAVY_SOFT = "rgba(11, 31, 58, 0.28)"
+NAVY_SOFT = "rgba(11, 31, 58, 0.36)"
 GRID = "#B8C7D9"
 AXIS = "#6B82A0"
 BG = "#EEF2F7"
@@ -29,10 +29,10 @@ POSITION_MAP = {24: "GK", 25: "DEF", 26: "MID", 27: "FWD"}
 MAX_BETWEEN_DAYS = 90
 MAX_SEASONS = 3
 
-BAND_ELITE = "#1B4F72"
-BAND_STRONG = "#5B8DEF"
-BAND_AVG = "#A8B8CC"
-BAND_BELOW = "#D5DCE6"
+BAND_ELITE = "#5C7A9A"
+BAND_STRONG = "#8BB0F5"
+BAND_AVG = "#C5D0DE"
+BAND_BELOW = "#E4E9F0"
 
 
 def percentile_band(p):
@@ -164,9 +164,9 @@ T = {
     if is_en
     else "データがありません。下の「データメンテナンス」から取得してください。",
     "no_fixtures": (
-        "No finished fixtures found for this season. Check status for details."
+        "No finished fixtures found for this season."
         if is_en
-        else "このシーズンの終了試合が取得できませんでした。ステータスを確認してください。"
+        else "このシーズンの終了試合が取得できませんでした。"
     ),
     "no_players": "No players match the filters. Try lowering minimum minutes."
     if is_en
@@ -177,13 +177,13 @@ T = {
         "who meet the selected minimum-minute threshold (0–100).\n\n"
         "**Bands:** Elite 90–100 · Strong 70–89 · Average 30–69 · Below 0–29\n\n"
         "Higher is better, except **Goals Conceded/90** and **Fouls/90**.\n\n"
-        "Bars & shape = percentile · labels = Per90 (or %)."
+        "Radar **shape** = percentile · vertex **labels** = Per90 (or %)."
         if is_en
         else "選択した最低出場時間を満たす**同ポジション**の選手を母集団として、"
         "位置を 0–100 で示します。\n\n"
         "**帯:** Elite 90–100 · Strong 70–89 · Average 30–69 · Below 0–29\n\n"
         "基本は高いほど良いですが、**失点/90・ファウル/90**は少ないほど高Percentileです。\n\n"
-        "扇バー＆形 = Percentile · 数字 = Per90（または%）。"
+        "レーダーの**形** = Percentile · 頂点の**数字** = Per90（または%）。"
     ),
     "early_note": (
         "Early season: small samples make percentiles more volatile."
@@ -343,67 +343,41 @@ def _date_chunks(start_s, end_s, max_days=MAX_BETWEEN_DAYS):
 
 
 def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, display_texts):
-    """
-    ハイブリッド:
-    - Barpolar（扇）: Percentile + 帯色 → 一目で強弱
-    - Scatterpolar（ポリゴン）: タイプのシルエット
-    - 外側テキスト: Per90 / %
-    """
-    n = max(len(labels), 1)
-    bar_width = max(18.0, min(32.0, 280.0 / n))
+    """ポリゴンのみ。形=Percentile / 外側数字=Per90。"""
+    r_poly = values + [values[0]]
+    theta = labels + [labels[0]]
+    colors_closed = marker_colors + [marker_colors[0]]
+
+    OUTER_R = 108
+    r_text = [OUTER_R] * len(values)
+    r_text_closed = r_text + [r_text[0]]
+    text_closed = list(display_texts) + [display_texts[0]]
 
     fig = go.Figure()
-
-    # 1) 扇バー（Percentile）
-    fig.add_trace(
-        go.Barpolar(
-            r=values,
-            theta=labels,
-            marker={
-                "color": marker_colors,
-                "line": {"color": WHITE, "width": 1.2},
-            },
-            opacity=0.82,
-            width=[bar_width] * n,
-            hovertemplate="%{theta}: %{r:.0f} pctile<extra></extra>",
-            base=0,
-        )
-    )
-
-    # 2) ポリゴン（シルエット）
-    r_poly = values + [values[0]]
-    theta_closed = labels + [labels[0]]
-    colors_closed = marker_colors + [marker_colors[0]]
     fig.add_trace(
         go.Scatterpolar(
             r=r_poly,
-            theta=theta_closed,
+            theta=theta,
             fill="toself",
             fillcolor=NAVY_SOFT,
-            line={"color": NAVY, "width": 2.8},
+            line={"color": NAVY, "width": 3.8},
             marker={
                 "color": colors_closed,
-                "size": 14,
-                "line": {"color": WHITE, "width": 1.4},
+                "size": 18,
+                "line": {"color": NAVY, "width": 1.6},
             },
             mode="lines+markers",
-            hoverinfo="skip",
+            hovertemplate="%{theta}: %{r:.0f} pctile<extra></extra>",
         )
     )
-
-    # 3) Per90 ラベル（外側固定）
-    OUTER_R = 112
-    r_text = [OUTER_R] * n
-    r_text_closed = r_text + [r_text[0]]
-    text_closed = list(display_texts) + [display_texts[0]]
     fig.add_trace(
         go.Scatterpolar(
             r=r_text_closed,
-            theta=theta_closed,
+            theta=theta,
             mode="text",
             text=text_closed,
             textfont={
-                "size": 18,
+                "size": 20,
                 "color": NAVY,
                 "family": "Arial Black, Arial, sans-serif",
             },
@@ -412,8 +386,8 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, di
     )
 
     annotations = []
-    title_sizes = [46, 21, 16]
-    title_ys = [0.985, 0.938, 0.905]
+    title_sizes = [48, 22, 17]
+    title_ys = [0.985, 0.935, 0.900]
     for i, line in enumerate(title_lines):
         annotations.append(
             {
@@ -427,32 +401,11 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, di
                 "showarrow": False,
                 "font": {
                     "color": NAVY,
-                    "size": title_sizes[i] if i < len(title_sizes) else 15,
+                    "size": title_sizes[i] if i < len(title_sizes) else 16,
                     "family": "Arial",
                 },
             }
         )
-
-    # 帯凡例（色付き）
-    legend_html = (
-        f"<span style='color:{BAND_ELITE}'><b>■ Elite 90+</b></span>　"
-        f"<span style='color:{BAND_STRONG}'><b>■ Strong 70–89</b></span>　"
-        f"<span style='color:{BAND_AVG}'><b>■ Average 30–69</b></span>　"
-        f"<span style='color:#8A96A8'><b>■ Below &lt;30</b></span>"
-    )
-    annotations.append(
-        {
-            "text": legend_html,
-            "xref": "paper",
-            "yref": "paper",
-            "x": 0.5,
-            "y": 0.145,
-            "xanchor": "center",
-            "yanchor": "top",
-            "showarrow": False,
-            "font": {"size": 13, "family": "Arial"},
-        }
-    )
 
     base_y = 0.108
     for i, line in enumerate(footnotes or []):
@@ -462,11 +415,11 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, di
                 "xref": "paper",
                 "yref": "paper",
                 "x": 0.03,
-                "y": base_y - i * 0.024,
+                "y": base_y - i * 0.026,
                 "xanchor": "left",
                 "yanchor": "top",
                 "showarrow": False,
-                "font": {"color": "#374151", "size": 13, "family": "Arial"},
+                "font": {"color": "#374151", "size": 15, "family": "Arial"},
             }
         )
 
@@ -506,35 +459,34 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, di
     fig.update_layout(
         height=1500,
         width=1200,
-        margin={"l": 120, "r": 120, "t": 155, "b": 175},
+        margin={"l": 120, "r": 120, "t": 160, "b": 170},
         paper_bgcolor=WHITE,
         plot_bgcolor=WHITE,
         showlegend=False,
         images=images,
         annotations=annotations,
         polar={
-            "domain": {"x": [0.14, 0.86], "y": [0.19, 0.80]},
+            "domain": {"x": [0.15, 0.85], "y": [0.18, 0.80]},
             "bgcolor": BG,
             "radialaxis": {
                 "visible": True,
                 "range": [0, 122],
-                "tickvals": [0, 25, 50, 75, 100],
+                "tickvals": [0, 20, 40, 60, 80, 100],
                 "gridcolor": GRID,
                 "linecolor": AXIS,
-                "tickfont": {"color": AXIS, "size": 12},
+                "tickfont": {"color": AXIS, "size": 14},
             },
             "angularaxis": {
                 "gridcolor": GRID,
                 "linecolor": AXIS,
                 "tickfont": {
                     "color": NAVY,
-                    "size": 13,
+                    "size": 14,
                     "family": "Arial",
                 },
                 "rotation": 90,
                 "direction": "clockwise",
             },
-            "bargap": 0.15,
         },
     )
     return fig
@@ -1237,7 +1189,7 @@ else:
             )
 
         footnotes = [
-            f"Bars & shape = percentile · Labels = Per90/% · Sample: {pos}, ≥{int(min_min)} min (n={n_pos})",
+            f"Shape = percentile (0–100) · Labels = Per90 (or %) · Sample: {pos}, ≥{int(min_min)} min (n={n_pos})",
             "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30  |  Conceded/Fouls inverted",
             "Per90 uses Minutes Played · Pass Acc = Σ accurate ÷ Σ passes · Fixture aggregate",
             f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
@@ -1258,7 +1210,14 @@ else:
         try:
             png = fig.to_image(format="png", width=1200, height=1500, scale=2)
             st.image(png, use_container_width=True)
-            st.caption(T["band_legend"] + (" · Bars=percentile · Labels=Per90/%" if is_en else " · 扇=Percentile · 数字=Per90/%"))
+            st.caption(
+                T["band_legend"]
+                + (
+                    " · Shape = percentile · Labels = Per90/%"
+                    if is_en
+                    else " · 形=Percentile · 数字=Per90/%"
+                )
+            )
             st.download_button(
                 T["download"],
                 data=png,
@@ -1284,8 +1243,7 @@ with st.expander(T["method_title"], expanded=False):
 - Sportmonks Football API · Superliga (271) · Fixture `lineups.details`
 
 **Chart**
-- Colored polar bars + polygon silhouette = percentile
-- Outer labels = Per90 (or %)
+- Shape = percentile · Outer labels = Per90 (or %)
             """
         )
     else:
@@ -1295,8 +1253,7 @@ with st.expander(T["method_title"], expanded=False):
 - Sportmonks · Superliga · 試合単位 `lineups.details`
 
 **チャート**
-- 色付き扇バー + ポリゴン = Percentile
-- 外側の数字 = Per90（または%）
+- 形 = Percentile · 外側の数字 = Per90（または%）
             """
         )
 
