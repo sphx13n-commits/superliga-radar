@@ -24,6 +24,7 @@ GRID = "#B8C7D9"
 AXIS = "#6B82A0"
 BG = "#EEF2F7"
 WHITE = "#FFFFFF"
+RING_100 = "#3D5A80"  # Percentile 100 の境界円
 MINUTES_TYPE_ID = 119
 LEAGUE_ID = 271
 CACHE_ROOT = Path(__file__).with_name("cache") / "superliga"
@@ -177,11 +178,11 @@ T = {
     "pct_body": (
         "Same-position ranking 0–100 under the minute filter.\n\n"
         "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30\n\n"
-        "Shape = percentile · Labels = Per90 (single view only)."
+        "Shape = percentile · Outer ring = 100 · Labels = Per90 (single view)."
         if is_en
         else "同ポジション・出場時間条件での順位（0–100）。\n\n"
         "帯: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満\n\n"
-        "形 = Percentile · 数字 = Per90（単体表示時）。"
+        "形 = Percentile · 太い円 = 100の上限 · 数字 = Per90（単体時）。"
     ),
     "early_note": (
         "Early season: overall sample is still building — treat percentiles as indicative."
@@ -199,7 +200,6 @@ T = {
         else "Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満"
     ),
     "method_title": "Data & methodology" if is_en else "データと計算方法",
-    "status_title": "Data update status" if is_en else "データ更新ステータス",
     "admin_title": "Data maintenance" if is_en else "データメンテナンス",
     "last_updated": "Last updated" if is_en else "最終更新",
     "connected": "Connected" if is_en else "接続済み",
@@ -351,10 +351,32 @@ def build_radar_figure(
     name_a=None,
     name_b=None,
 ):
-    """形 = Percentile 0–100。軸 [0,100] で100%が外縁。"""
+    """
+    形 = Percentile 0–100
+    軸 = 0–122（外側はラベル用余白）
+    太い円 = Percentile 100 の境界
+    """
     fig = go.Figure()
+    n = len(labels)
     theta = labels + [labels[0]]
 
+    # --- Percentile 100 の境界円（先に描いて背面寄りに） ---
+    # 滑らかな円にするため点を多めに
+    ring_n = max(72, n * 8)
+    ring_theta = [i * (360.0 / ring_n) for i in range(ring_n + 1)]
+    ring_r = [100.0] * (ring_n + 1)
+    fig.add_trace(
+        go.Scatterpolar(
+            r=ring_r,
+            theta=ring_theta,
+            mode="lines",
+            line={"color": RING_100, "width": 2.4},
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
+
+    # Player A
     r_a = values_a + [values_a[0]]
     fig.add_trace(
         go.Scatterpolar(
@@ -390,9 +412,10 @@ def build_radar_figure(
             )
         )
 
+    # 単体時のみ Per90（100の外側）
     if values_b is None and display_texts is not None:
-        OUTER_R = 100
-        r_text = [OUTER_R] * len(labels) + [OUTER_R]
+        OUTER_R = 108
+        r_text = [OUTER_R] * n + [OUTER_R]
         text_closed = list(display_texts) + [display_texts[0]]
         fig.add_trace(
             go.Scatterpolar(
@@ -502,18 +525,18 @@ def build_radar_figure(
     fig.update_layout(
         height=1500,
         width=1200,
-        margin={"l": 130, "r": 130, "t": 155, "b": 170},
+        margin={"l": 120, "r": 120, "t": 155, "b": 170},
         paper_bgcolor=WHITE,
         plot_bgcolor=WHITE,
         showlegend=False,
         images=images,
         annotations=annotations,
         polar={
-            "domain": {"x": [0.14, 0.86], "y": [0.19, 0.80]},
+            "domain": {"x": [0.15, 0.85], "y": [0.19, 0.80]},
             "bgcolor": BG,
             "radialaxis": {
                 "visible": True,
-                "range": [0, 100],
+                "range": [0, 122],
                 "tickvals": [0, 20, 40, 60, 80, 100],
                 "gridcolor": GRID,
                 "linecolor": AXIS,
@@ -655,7 +678,6 @@ team_id_to_name = {
 def _paginate_fixtures_window(start, end, filter_str=None):
     all_fx, page, errors = [], 1, 0
     last_status = None
-    error_body = None
     while True:
         req_params = {
             **params,
@@ -672,55 +694,36 @@ def _paginate_fixtures_window(start, end, filter_str=None):
         )
         last_status = res.status_code
         if res.status_code != 200:
-            errors += 1
-            try:
-                error_body = res.json()
-            except Exception:
-                error_body = {"raw": (res.text or "")[:800]}
+            errors = 1
             break
         body = res.json() or {}
-        chunk = body.get("data") or []
-        all_fx.extend(chunk)
+        all_fx.extend(body.get("data") or [])
         if not (body.get("pagination") or {}).get("has_more"):
             break
         page += 1
         if page > 30:
             break
         time.sleep(0.05)
-    return all_fx, errors, last_status, error_body
+    return all_fx, (0 if last_status == 200 else 1), last_status, None
 
 
 def _fetch_between_chunked(start_s, end_s, filter_str=None):
     chunks = _date_chunks(start_s, end_s, MAX_BETWEEN_DAYS)
     all_fx, seen_ids = [], set()
     total_errors = 0
-    last_status, last_error_body = None, None
-    windows = []
+    last_status = None
     for w_start, w_end in chunks:
-        fx, err, status, body = _paginate_fixtures_window(w_start, w_end, filter_str)
+        fx, err, status, _ = _paginate_fixtures_window(w_start, w_end, filter_str)
         last_status = status
-        if err:
-            total_errors += err
-            last_error_body = body
-        added = 0
+        total_errors += err
         for item in fx:
             fid = item.get("id")
             if fid is None or fid in seen_ids:
                 continue
             seen_ids.add(fid)
             all_fx.append(item)
-            added += 1
-        windows.append(
-            {
-                "start": w_start,
-                "end": w_end,
-                "http": status,
-                "count": added,
-                "errors": err,
-            }
-        )
         time.sleep(0.05)
-    return all_fx, total_errors, last_status, last_error_body, windows
+    return all_fx, total_errors, last_status, None, []
 
 
 def fetch_season_fixtures_list(sid, season_meta_row):
@@ -732,31 +735,14 @@ def fetch_season_fixtures_list(sid, season_meta_row):
     if wide_end < wide_start:
         wide_end = wide_start
 
-    methods_tried = []
-    fx_a, err_a, st_a, body_a, win_a = _fetch_between_chunked(
+    fx_a, err_a, st_a, _, _ = _fetch_between_chunked(
         wide_start, wide_end, f"fixtureSeasons:{sid}"
-    )
-    methods_tried.append(
-        {
-            "method": "fixtureSeasons_chunked",
-            "count": len(fx_a),
-            "errors": err_a,
-            "http": st_a,
-        }
     )
     all_fx, errors = fx_a, err_a
 
     if len(all_fx) == 0:
-        fx_b, err_b, st_b, body_b, win_b = _fetch_between_chunked(
+        fx_b, err_b, st_b, _, _ = _fetch_between_chunked(
             wide_start, wide_end, f"fixtureLeagues:{LEAGUE_ID}"
-        )
-        methods_tried.append(
-            {
-                "method": "fixtureLeagues_chunked",
-                "count": len(fx_b),
-                "errors": err_b,
-                "http": st_b,
-            }
         )
         filtered = []
         for fx in fx_b:
@@ -781,7 +767,6 @@ def fetch_season_fixtures_list(sid, season_meta_row):
         "total_fetched": len(all_fx),
         "finished_count": len(finished),
         "list_errors": errors,
-        "methods_tried": methods_tried,
         "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "fixtures": [
             {
@@ -1041,7 +1026,6 @@ if st.session_state.get("fx_aggs") is None:
 
 aggs = st.session_state.get("fx_aggs")
 status = st.session_state.get("fx_status") or {}
-errors = st.session_state.get("fx_errors") or []
 
 st.caption(
     f"{T['connected']} · {T['last_updated']}: **{format_updated_at(status.get('updated_at'))}** · "
@@ -1218,7 +1202,7 @@ else:
 
         if selected_b is None:
             footnotes = [
-                f"Shape = percentile (0–100) · Labels = Per90/% · {sample_line}",
+                f"Shape = percentile (0–100) · Bold ring = 100 · Labels = Per90/% · {sample_line}",
                 "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30",
                 "Per90 uses Minutes Played · Fixture aggregate",
                 f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
@@ -1238,9 +1222,9 @@ else:
             )
         else:
             footnotes = [
-                f"Overlay = percentile rank (0–100) · Numbers in table · {sample_line}",
+                f"Overlay = percentile (0–100) · Bold ring = 100 · {sample_line}",
                 f"Navy = {selected_a['Player']} · Orange = {selected_b['Player']}",
-                "Same position only · Per90 uses Minutes Played · Fixture aggregate",
+                "Same position only · Numbers in table below",
                 f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
             ]
             title_lines = [
@@ -1319,9 +1303,9 @@ else:
 
 with st.expander(T["method_title"], expanded=False):
     st.markdown(
-        "同ポジション比較可 · 形=Percentile(0–100) · 単体時のみ頂点にPer90"
+        "形=Percentile(0–100) · 太い円=100の上限 · 外側はPer90用余白"
         if not is_en
-        else "Same-position compare · Shape=percentile 0–100 · Per90 labels in single view"
+        else "Shape=percentile 0–100 · Bold ring=100 ceiling · Outer margin for Per90 labels"
     )
 
 with st.expander(T["admin_title"], expanded=False):
