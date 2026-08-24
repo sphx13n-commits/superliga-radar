@@ -178,11 +178,11 @@ T = {
     "pct_body": (
         "Same-position ranking 0–100 under the minute filter.\n\n"
         "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30\n\n"
-        "Shape = percentile · Bold ring = 100 · Labels = Per90 (single view)."
+        "Shape = percentile · Vertex color = band (single) · Bold ring = 100 · Labels = Per90."
         if is_en
         else "同ポジション・出場時間条件での順位（0–100）。\n\n"
         "帯: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満\n\n"
-        "形 = Percentile · 太い円 = 100の上限 · 数字 = Per90（単体時）。"
+        "形 = Percentile · 頂点色 = 帯（単体時） · 太い円 = 100 · 数字 = Per90。"
     ),
     "early_note": (
         "Early season: overall sample is still building — treat percentiles as indicative."
@@ -350,17 +350,23 @@ def build_radar_figure(
     values_b=None,
     name_a=None,
     name_b=None,
+    marker_colors_a=None,
 ):
     """
-    形 = Percentile 0–100
-    軸 = 0–122（外側はラベル用）
-    太い線 = 100 の境界（カテゴリ軸で描画）
+    単体: 頂点 = 帯色
+    比較: A=紺 / B=オレンジ
+    太い線 = Percentile 100
     """
     fig = go.Figure()
     n = len(labels)
     theta = labels + [labels[0]]
 
-    # 1) データ先（カテゴリ軸を確定）
+    # 単体のみ帯色。比較時は紺固定
+    if marker_colors_a and values_b is None:
+        m_colors = list(marker_colors_a) + [marker_colors_a[0]]
+    else:
+        m_colors = NAVY
+
     r_a = values_a + [values_a[0]]
     fig.add_trace(
         go.Scatterpolar(
@@ -369,7 +375,11 @@ def build_radar_figure(
             fill="toself",
             fillcolor=NAVY_SOFT,
             line={"color": NAVY, "width": 3.4},
-            marker={"color": NAVY, "size": 11, "line": {"color": WHITE, "width": 1.2}},
+            marker={
+                "color": m_colors,
+                "size": 14,
+                "line": {"color": NAVY, "width": 1.4},
+            },
             mode="lines+markers",
             name=name_a or "A",
             hovertemplate="%{theta}: %{r:.0f}<extra>" + (name_a or "A") + "</extra>",
@@ -387,7 +397,7 @@ def build_radar_figure(
                 line={"color": ACCENT, "width": 3.4},
                 marker={
                     "color": ACCENT,
-                    "size": 11,
+                    "size": 14,
                     "line": {"color": WHITE, "width": 1.2},
                 },
                 mode="lines+markers",
@@ -396,7 +406,7 @@ def build_radar_figure(
             )
         )
 
-    # 2) Percentile 100 境界（同じ labels＝カテゴリ。数値の度は使わない）
+    # 100 境界（カテゴリ軸）
     fig.add_trace(
         go.Scatterpolar(
             r=[100.0] * (n + 1),
@@ -408,7 +418,7 @@ def build_radar_figure(
         )
     )
 
-    # 3) 単体時のみ Per90
+    # 単体のみ Per90
     if values_b is None and display_texts is not None:
         OUTER_R = 108
         fig.add_trace(
@@ -729,13 +739,13 @@ def fetch_season_fixtures_list(sid, season_meta_row):
     if wide_end < wide_start:
         wide_end = wide_start
 
-    fx_a, err_a, st_a, _, _ = _fetch_between_chunked(
+    fx_a, err_a, _, _, _ = _fetch_between_chunked(
         wide_start, wide_end, f"fixtureSeasons:{sid}"
     )
     all_fx, errors = fx_a, err_a
 
     if len(all_fx) == 0:
-        fx_b, err_b, st_b, _, _ = _fetch_between_chunked(
+        fx_b, err_b, _, _, _ = _fetch_between_chunked(
             wide_start, wide_end, f"fixtureLeagues:{LEAGUE_ID}"
         )
         filtered = []
@@ -1186,6 +1196,11 @@ else:
             )
             for m in mdefs
         ]
+        marker_colors_a = [
+            percentile_band(selected_a.get("pct", {}).get(m["key"]))[1]
+            for m in mdefs
+        ]
+
         values_b = None
         if selected_b is not None:
             values_b = [selected_b.get("pct", {}).get(m["key"]) or 0 for m in mdefs]
@@ -1196,7 +1211,7 @@ else:
 
         if selected_b is None:
             footnotes = [
-                f"Shape = percentile (0–100) · Bold ring = 100 · Labels = Per90/% · {sample_line}",
+                f"Shape = percentile (0–100) · Vertex = band · Bold ring = 100 · Labels = Per90/% · {sample_line}",
                 "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30",
                 "Per90 uses Minutes Played · Fixture aggregate",
                 f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
@@ -1213,6 +1228,7 @@ else:
                 footnotes,
                 display_texts=display_a,
                 name_a=selected_a["Player"],
+                marker_colors_a=marker_colors_a,
             )
         else:
             footnotes = [
@@ -1235,6 +1251,7 @@ else:
                 values_b=values_b,
                 name_a=selected_a["Player"],
                 name_b=selected_b["Player"],
+                marker_colors_a=None,
             )
 
         try:
@@ -1297,9 +1314,9 @@ else:
 
 with st.expander(T["method_title"], expanded=False):
     st.markdown(
-        "形=Percentile(0–100) · 太い円=100の上限 · 外側はPer90用余白"
+        "単体: 頂点色=帯 · 比較: 紺/オレンジ · 形=Percentile · 太い円=100"
         if not is_en
-        else "Shape=percentile 0–100 · Bold ring=100 · Outer margin for Per90 labels"
+        else "Single: vertex=band color · Compare: navy/orange · Shape=percentile · Bold ring=100"
     )
 
 with st.expander(T["admin_title"], expanded=False):
