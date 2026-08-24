@@ -158,9 +158,14 @@ T = {
     if is_en
     else "全Fixtureを強制再取得（通常は不要）",
     "updating": "Updating..." if is_en else "更新中...",
-    "no_data": "No data yet. Open Data maintenance below."
+    "no_data": "No data yet. Open Data maintenance below and run Update."
     if is_en
     else "データがありません。下の「データメンテナンス」から取得してください。",
+    "no_fixtures": (
+        "No finished fixtures found for this season. Try Update again, or check season dates."
+        if is_en
+        else "このシーズンの終了試合が取得できませんでした。データ更新を再実行するか、別シーズンを試してください。"
+    ),
     "no_players": "No players match the filters. Try lowering minimum minutes."
     if is_en
     else "条件に合う選手がいません。最低出場時間を下げてください。",
@@ -553,14 +558,13 @@ season_id = season_options[selected_season_name]
 season_name = selected_season_name
 season_info = season_meta.get(season_id, {})
 
-# ----- シーズン切替検知：前シーズンの session データを破棄 -----
+# シーズン切替検知
 if st.session_state.get("loaded_season_id") != season_id:
     st.session_state.fx_aggs = None
     st.session_state.fx_status = None
     st.session_state.fx_errors = []
     st.session_state.loaded_season_id = season_id
 
-# 選択シーズンのチーム一覧
 teams_res = requests.get(
     f"{base_url}/teams/seasons/{season_id}",
     headers=headers,
@@ -575,44 +579,116 @@ team_id_to_name = {
 }
 
 
-def fetch_season_fixtures_list(sid, season_meta_row):
-    start = (season_meta_row.get("starting_at") or "2024-07-01")[:10]
-    end = (season_meta_row.get("ending_at") or "2027-06-30")[:10]
-    today = date.today().isoformat()
-    if end > today:
-        end = today
+def _paginate_fixtures(start, end, filter_str):
+    """fixtures/between をページング取得。"""
     all_fx, page, errors = [], 1, 0
+    last_status = None
     while True:
         res = requests.get(
             f"{base_url}/fixtures/between/{start}/{end}",
             headers=headers,
             params={
                 **params,
-                "filters": f"fixtureLeagues:{LEAGUE_ID}",
+                "filters": filter_str,
                 "include": "state;participants;scores",
                 "page": page,
             },
             timeout=40,
         )
+        last_status = res.status_code
         if res.status_code != 200:
             errors += 1
             break
         body = res.json() or {}
-        all_fx.extend(body.get("data") or [])
+        chunk = body.get("data") or []
+        all_fx.extend(chunk)
         if not (body.get("pagination") or {}).get("has_more"):
             break
         page += 1
-        if page > 40:
+        if page > 50:
             break
-        time.sleep(0.08)
+        time.sleep(0.06)
+    return all_fx, errors, last_status
+
+
+def fetch_season_fixtures_list(sid, season_meta_row):
+    """
+    シーズンID優先でFixture一覧を取得。
+    1) fixtureSeasons:{sid}
+    2) fixtureLeagues:{LEAGUE_ID}（フォールバック）
+    """
+    start = (season_meta_row.get("starting_at") or "")[:10]
+    end = (season_meta_row.get("ending_at") or "")[:10]
+    if not start:
+        start = "2024-07-01"
+    if not end:
+        end = "2027-06-30"
+    # 終了日が未来なら今日までに制限（進行中シーズン用）
+    today = date.today().isoformat()
+    end_capped = end if end <= today else today
+    # between は広めの方が取りこぼしにくい
+    wide_start = start
+    wide_end = end if end > today else today
+    if wide_end < wide_start:
+        wide_end = wide_start
+
+    methods_tried = []
+    all_fx, errors, http_status = [], 0, None
+
+    # Method A: シーズンID指定（本命）
+    fx_a, err_a, st_a = _paginate_fixtures(
+        wide_start, wide_end, f"fixtureSeasons:{sid}"
+    )
+    methods_tried.append(
+        {"method": "fixtureSeasons", "count": len(fx_a), "errors": err_a, "http": st_a}
+    )
+    all_fx, errors, http_status = fx_a, err_a, st_a
+
+    # Method B: リーグ指定フォールバック
+    if len(all_fx) == 0:
+        fx_b, err_b, st_b = _paginate_fixtures(
+            wide_start, wide_end, f"fixtureLeagues:{LEAGUE_ID}"
+        )
+        methods_tried.append(
+            {
+                "method": "fixtureLeagues",
+                "count": len(fx_b),
+                "errors": err_b,
+                "http": st_b,
+            }
+        )
+        # シーズンIDで絞る（レスポンスに season_id がある場合）
+        filtered = []
+        for fx in fx_b:
+            fx_sid = (
+                fx.get("season_id")
+                or (fx.get("season") or {}).get("id")
+            )
+            if fx_sid is None or int(fx_sid) == int(sid):
+                filtered.append(fx)
+        # season_id が無いデータしかない場合はリーグ結果をそのまま使う
+        all_fx = filtered if filtered else fx_b
+        errors += err_b
+        http_status = st_b
+
     finished = [fx for fx in all_fx if _is_finished_fixture(fx)]
+    # 終了判定が厳しすぎる場合の緩和: scores があるもの
+    if len(finished) == 0 and len(all_fx) > 0:
+        finished = [
+            fx
+            for fx in all_fx
+            if fx.get("scores") or fx.get("result_info") or fx.get("state_id") in (5, 7, 8)
+        ]
+
     payload = {
         "season_id": sid,
-        "start": start,
-        "end": end,
+        "start": wide_start,
+        "end": wide_end,
         "total_fetched": len(all_fx),
         "finished_count": len(finished),
         "list_errors": errors,
+        "http_status": http_status,
+        "methods_tried": methods_tried,
         "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "fixtures": [
             {
@@ -644,7 +720,7 @@ def load_fixture_detail(sid, fixture_id, force_refresh=False):
         return None, "error", f"HTTP {res.status_code}"
     data = (res.json() or {}).get("data")
     _save_json(path, data)
-    time.sleep(0.08)
+    time.sleep(0.06)
     return data, "api", None
 
 
@@ -707,11 +783,14 @@ def restore_aggs_from_file(sid):
     cached = _load_json(_cache_dir(sid) / "player_team_aggregate.json")
     if not cached:
         return None, None
-    # シーズン不一致のキャッシュは使わない
-    if cached.get("season_id") not in (None, sid) and int(cached.get("season_id") or 0) != int(sid):
-        return None, None
+    if cached.get("season_id") not in (None, sid):
+        try:
+            if int(cached.get("season_id")) != int(sid):
+                return None, None
+        except (TypeError, ValueError):
+            pass
     players = cached.get("players")
-    if not isinstance(players, list):
+    if not isinstance(players, list) or not players:
         return None, None
     restored = {}
     for p in players:
@@ -749,6 +828,7 @@ def restore_aggs_from_file(sid):
         "finished_fixtures": cached.get("finished_fixtures"),
         "aggregate_rebuilt": cached.get("aggregate_rebuilt"),
         "updated_at": cached.get("updated_at"),
+        "total_fetched": cached.get("total_fetched"),
         "from_cache_file": True,
         "mode": "cache_file",
         "errors": 0,
@@ -771,9 +851,10 @@ def save_aggs(sid, aggs, status):
         for a in aggs.values()
     ]
     safe_status = {k: v for k, v in (status or {}).items() if k != "players"}
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     payload = {
         "season_id": sid,
-        "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "updated_at": now,
         "player_count": len(aggs),
         "players": rows_out,
         **safe_status,
@@ -787,6 +868,7 @@ def incremental_update(sid, season_meta_row, force_all=False):
     flist = fetch_season_fixtures_list(sid, season_meta_row)
     finished_ids = [f["id"] for f in flist.get("fixtures", [])]
     finished_count = len(finished_ids)
+    total_fetched = flist.get("total_fetched", 0)
 
     cached_ids, missing_ids = [], []
     for fid in finished_ids:
@@ -820,7 +902,10 @@ def incremental_update(sid, season_meta_row, force_all=False):
         or new_fetched > 0
         or (not agg_path.exists())
         or restore_aggs_from_file(sid)[0] is None
+        or finished_count == 0
     )
+
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     if not need_rebuild and agg_path.exists():
         aggs, meta = restore_aggs_from_file(sid)
@@ -830,12 +915,14 @@ def incremental_update(sid, season_meta_row, force_all=False):
                 "cached_fixtures": len(cached_ids),
                 "new_fetched": 0,
                 "loaded_fixtures": len(loaded),
+                "total_fetched": total_fetched,
                 "errors": len(errors),
                 "aggregate_rebuilt": False,
                 "players": len(aggs),
-                "updated_at": (meta or {}).get("updated_at"),
+                "updated_at": (meta or {}).get("updated_at") or now,
                 "mode": "incremental_skip_rebuild",
                 "season_id": sid,
+                "methods_tried": flist.get("methods_tried"),
             }
             return aggs, status, errors
 
@@ -845,18 +932,22 @@ def incremental_update(sid, season_meta_row, force_all=False):
         "cached_fixtures": len(cached_ids),
         "new_fetched": new_fetched,
         "loaded_fixtures": len(loaded),
+        "total_fetched": total_fetched,
         "errors": len(errors),
         "aggregate_rebuilt": True,
         "players": len(aggs),
         "fixtures": len(loaded),
         "mode": "rebuild",
         "season_id": sid,
+        "updated_at": now,
+        "methods_tried": flist.get("methods_tried"),
+        "list_errors": flist.get("list_errors"),
     }
     save_aggs(sid, aggs, status)
     return aggs, status, errors
 
 
-# ----- 選択シーズンのデータをロード -----
+# ----- load selected season -----
 if st.session_state.get("fx_aggs") is None:
     with st.spinner(T["season_loading"]):
         aggs, meta = restore_aggs_from_file(season_id)
@@ -889,7 +980,10 @@ st.caption(
 )
 
 if not aggs:
-    st.info(T["no_data"])
+    if (status.get("finished_fixtures") == 0) and (status.get("total_fetched") == 0):
+        st.warning(T["no_fixtures"])
+    else:
+        st.info(T["no_data"])
 else:
     st.markdown(f"##### {T['filters']}")
     f1, f2 = st.columns(2)
@@ -935,7 +1029,6 @@ else:
                 )
 
     all_players = [g for pos in by_pos.values() for g in pos]
-    # None / 型混在で sorted が落ちないようにする
     teams_in = sorted(
         {str(g["Team"]) for g in all_players if g.get("Team") not in (None, "")}
     )
@@ -1102,9 +1195,9 @@ with st.expander(T["method_title"], expanded=False):
             """
         )
 
-with st.expander(T["admin_title"], expanded=False):
+with st.expander(T["admin_title"], expanded=True):
     force_all = st.checkbox(T["force"], value=False)
-    if st.button(T["update"], type="secondary"):
+    if st.button(T["update"], type="primary"):
         with st.spinner(T["updating"]):
             aggs2, status2, errors2 = incremental_update(
                 season_id, season_info, force_all=force_all
@@ -1113,7 +1206,9 @@ with st.expander(T["admin_title"], expanded=False):
             st.session_state.fx_status = status2
             st.session_state.fx_errors = errors2
             st.session_state.loaded_season_id = season_id
-            if status2.get("aggregate_rebuilt"):
+            if status2.get("finished_fixtures", 0) == 0:
+                st.warning(T["no_fixtures"])
+            elif status2.get("aggregate_rebuilt"):
                 st.success(
                     f"{T['rebuild_ok']} · new={status2.get('new_fetched', 0)} · "
                     f"players={status2.get('players', 0)}"
@@ -1129,6 +1224,7 @@ with st.expander(T["admin_title"], expanded=False):
         {
             "season_id": season_id,
             "finished_fixtures": status.get("finished_fixtures"),
+            "total_fetched": status.get("total_fetched"),
             "cached_fixtures": status.get("cached_fixtures"),
             "new_fetched": status.get("new_fetched"),
             "loaded_fixtures": status.get("loaded_fixtures") or status.get("fixtures"),
@@ -1139,5 +1235,7 @@ with st.expander(T["admin_title"], expanded=False):
             "errors": status.get("errors")
             if status.get("errors") is not None
             else len(errors),
+            "list_errors": status.get("list_errors"),
+            "methods_tried": status.get("methods_tried"),
         }
     )
