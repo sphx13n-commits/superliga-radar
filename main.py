@@ -2,7 +2,7 @@ import base64
 import json
 import os
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -26,6 +26,8 @@ MINUTES_TYPE_ID = 119
 LEAGUE_ID = 271
 CACHE_ROOT = Path(__file__).with_name("cache") / "superliga"
 POSITION_MAP = {24: "GK", 25: "DEF", 26: "MID", 27: "FWD"}
+# Sportmonks fixtures/between は最大100日。余裕を見て90日
+MAX_BETWEEN_DAYS = 90
 
 BAND_ELITE = "#5C7A9A"
 BAND_STRONG = "#8BB0F5"
@@ -162,9 +164,9 @@ T = {
     if is_en
     else "データがありません。下の「データメンテナンス」から取得してください。",
     "no_fixtures": (
-        "No finished fixtures found for this season. Check methods_tried / error_body in status."
+        "No finished fixtures found for this season. Check status for details."
         if is_en
-        else "このシーズンの終了試合が取得できませんでした。ステータスの methods_tried / error_body を確認してください。"
+        else "このシーズンの終了試合が取得できませんでした。ステータスを確認してください。"
     ),
     "no_players": "No players match the filters. Try lowering minimum minutes."
     if is_en
@@ -321,6 +323,25 @@ def format_updated_at(iso_str):
         return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     except Exception:
         return str(iso_str)[:19]
+
+
+def _parse_ymd(s):
+    return datetime.strptime(s[:10], "%Y-%m-%d").date()
+
+
+def _date_chunks(start_s, end_s, max_days=MAX_BETWEEN_DAYS):
+    """start〜end を max_days 以下の区間に分割。"""
+    start = _parse_ymd(start_s)
+    end = _parse_ymd(end_s)
+    if end < start:
+        end = start
+    chunks = []
+    cur = start
+    while cur <= end:
+        chunk_end = min(cur + timedelta(days=max_days - 1), end)
+        chunks.append((cur.isoformat(), chunk_end.isoformat()))
+        cur = chunk_end + timedelta(days=1)
+    return chunks
 
 
 def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, display_texts):
@@ -578,8 +599,8 @@ team_id_to_name = {
 }
 
 
-def _paginate_fixtures(start, end, filter_str=None):
-    """fixtures/between をページング取得。エラー時は本文も返す。"""
+def _paginate_fixtures_window(start, end, filter_str=None):
+    """1つの日付ウィンドウ（≤100日）をページング取得。"""
     all_fx, page, errors = [], 1, 0
     last_status = None
     error_body = None
@@ -612,14 +633,54 @@ def _paginate_fixtures(start, end, filter_str=None):
         if not (body.get("pagination") or {}).get("has_more"):
             break
         page += 1
-        if page > 50:
+        if page > 30:
             break
-        time.sleep(0.06)
+        time.sleep(0.05)
     return all_fx, errors, last_status, error_body
 
 
+def _fetch_between_chunked(start_s, end_s, filter_str=None):
+    """
+    100日制限対応: 日付を分割して between を呼び、結合する。
+    """
+    chunks = _date_chunks(start_s, end_s, MAX_BETWEEN_DAYS)
+    all_fx = []
+    seen_ids = set()
+    total_errors = 0
+    windows = []
+    last_status = None
+    last_error_body = None
+
+    for w_start, w_end in chunks:
+        fx, err, status, body = _paginate_fixtures_window(w_start, w_end, filter_str)
+        last_status = status
+        if err:
+            total_errors += err
+            last_error_body = body
+        added = 0
+        for item in fx:
+            fid = item.get("id")
+            if fid is None or fid in seen_ids:
+                continue
+            seen_ids.add(fid)
+            all_fx.append(item)
+            added += 1
+        windows.append(
+            {
+                "start": w_start,
+                "end": w_end,
+                "http": status,
+                "count": added,
+                "errors": err,
+                "error_body": body if err else None,
+            }
+        )
+        time.sleep(0.05)
+
+    return all_fx, total_errors, last_status, last_error_body, windows
+
+
 def fetch_season_fixtures_list(sid, season_meta_row):
-    """シーズンFixture一覧（診断情報付き）"""
     start = (season_meta_row.get("starting_at") or "")[:10]
     end = (season_meta_row.get("ending_at") or "")[:10]
     if not start:
@@ -629,20 +690,21 @@ def fetch_season_fixtures_list(sid, season_meta_row):
 
     today = date.today().isoformat()
     wide_start = start
-    wide_end = end if end > today else today
+    # 進行中シーズンは今日まで。過去シーズンは ending_at まで
+    wide_end = min(end, today) if end else today
     if wide_end < wide_start:
         wide_end = wide_start
 
     methods_tried = []
     all_fx, errors, http_status, err_body = [], 0, None, None
 
-    # A: fixtureSeasons
-    fx_a, err_a, st_a, body_a = _paginate_fixtures(
+    # A: fixtureSeasons + 日付チャンク
+    fx_a, err_a, st_a, body_a, win_a = _fetch_between_chunked(
         wide_start, wide_end, f"fixtureSeasons:{sid}"
     )
     methods_tried.append(
         {
-            "method": "fixtureSeasons",
+            "method": "fixtureSeasons_chunked",
             "filter": f"fixtureSeasons:{sid}",
             "start": wide_start,
             "end": wide_end,
@@ -650,18 +712,19 @@ def fetch_season_fixtures_list(sid, season_meta_row):
             "errors": err_a,
             "http": st_a,
             "error_body": body_a,
+            "windows": win_a,
         }
     )
     all_fx, errors, http_status, err_body = fx_a, err_a, st_a, body_a
 
-    # B: fixtureLeagues
+    # B: fixtureLeagues + チャンク（フォールバック）
     if len(all_fx) == 0:
-        fx_b, err_b, st_b, body_b = _paginate_fixtures(
+        fx_b, err_b, st_b, body_b, win_b = _fetch_between_chunked(
             wide_start, wide_end, f"fixtureLeagues:{LEAGUE_ID}"
         )
         methods_tried.append(
             {
-                "method": "fixtureLeagues",
+                "method": "fixtureLeagues_chunked",
                 "filter": f"fixtureLeagues:{LEAGUE_ID}",
                 "start": wide_start,
                 "end": wide_end,
@@ -669,6 +732,7 @@ def fetch_season_fixtures_list(sid, season_meta_row):
                 "errors": err_b,
                 "http": st_b,
                 "error_body": body_b,
+                "windows": win_b,
             }
         )
         filtered = []
@@ -680,34 +744,6 @@ def fetch_season_fixtures_list(sid, season_meta_row):
         errors += err_b
         http_status = st_b
         err_body = body_b
-
-    # C: filterなし between → season_id でクライアント絞り込み
-    if len(all_fx) == 0:
-        fx_c, err_c, st_c, body_c = _paginate_fixtures(
-            wide_start, wide_end, None
-        )
-        methods_tried.append(
-            {
-                "method": "between_no_filter",
-                "filter": None,
-                "start": wide_start,
-                "end": wide_end,
-                "count": len(fx_c),
-                "errors": err_c,
-                "http": st_c,
-                "error_body": body_c,
-            }
-        )
-        if fx_c:
-            filtered = []
-            for fx in fx_c:
-                fx_sid = fx.get("season_id") or (fx.get("season") or {}).get("id")
-                if fx_sid is not None and int(fx_sid) == int(sid):
-                    filtered.append(fx)
-            all_fx = filtered
-        errors += err_c
-        http_status = st_c
-        err_body = body_c
 
     finished = [fx for fx in all_fx if _is_finished_fixture(fx)]
     if len(finished) == 0 and len(all_fx) > 0:
@@ -730,6 +766,7 @@ def fetch_season_fixtures_list(sid, season_meta_row):
         "list_errors": errors,
         "http_status": http_status,
         "methods_tried": methods_tried,
+        "chunk_days": MAX_BETWEEN_DAYS,
         "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "fixtures": [
             {
@@ -761,7 +798,7 @@ def load_fixture_detail(sid, fixture_id, force_refresh=False):
         return None, "error", f"HTTP {res.status_code}"
     data = (res.json() or {}).get("data")
     _save_json(path, data)
-    time.sleep(0.06)
+    time.sleep(0.05)
     return data, "api", None
 
 
@@ -1025,7 +1062,7 @@ st.caption(
 )
 
 if not aggs:
-    if (status.get("finished_fixtures") == 0):
+    if status.get("finished_fixtures") == 0:
         st.warning(T["no_fixtures"])
     else:
         st.info(T["no_data"])
@@ -1214,7 +1251,6 @@ with st.expander(T["method_title"], expanded=False):
 - Per90 = total ÷ minutes × 90
 - Pass accuracy = successful passes ÷ total passes
 - Comparisons within the same position
-- Percentile uses players above the selected minimum minutes
 - Radar **shape** = percentile · vertex **labels** = Per90 (or %)
             """
         )
@@ -1231,7 +1267,6 @@ with st.expander(T["method_title"], expanded=False):
 - Per90 = 合計 ÷ 出場分 × 90
 - パス成功率 = 成功パス合計 ÷ パス合計
 - 比較は同じポジション内
-- Percentileは最低出場時間以上の選手のみが母集団
 - レーダーの**形** = Percentile · 頂点の**数字** = Per90（または%）
             """
         )
@@ -1251,8 +1286,8 @@ with st.expander(T["admin_title"], expanded=True):
                 st.warning(T["no_fixtures"])
             elif status2.get("aggregate_rebuilt"):
                 st.success(
-                    f"{T['rebuild_ok']} · new={status2.get('new_fetched', 0)} · "
-                    f"players={status2.get('players', 0)}"
+                    f"{T['rebuild_ok']} · finished={status2.get('finished_fixtures', 0)} · "
+                    f"new={status2.get('new_fetched', 0)} · players={status2.get('players', 0)}"
                 )
             else:
                 st.success(
