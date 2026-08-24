@@ -349,7 +349,10 @@ def build_radar_figure(
     name_a=None,
     name_b=None,
 ):
-    """単体 or A/B重ね。比較時は頂点数字なし（表で見る）。"""
+    """
+    形 = Percentile（0–100）。
+    軸レンジは 0–108（100がほぼ外縁）。ラベル用にわずかな余白のみ。
+    """
     fig = go.Figure()
     theta = labels + [labels[0]]
 
@@ -390,9 +393,9 @@ def build_radar_figure(
             )
         )
 
-    # Per90 labels only in single mode
+    # Per90 labels only in single mode（100のすぐ外側）
     if values_b is None and display_texts is not None:
-        OUTER_R = 108
+        OUTER_R = 104
         r_text = [OUTER_R] * len(labels) + [OUTER_R]
         text_closed = list(display_texts) + [display_texts[0]]
         fig.add_trace(
@@ -514,7 +517,7 @@ def build_radar_figure(
             "bgcolor": BG,
             "radialaxis": {
                 "visible": True,
-                "range": [0, 122],
+                "range": [0, 108],  # 100がほぼ外縁（旧122から縮小）
                 "tickvals": [0, 20, 40, 60, 80, 100],
                 "gridcolor": GRID,
                 "linecolor": AXIS,
@@ -785,7 +788,11 @@ def fetch_season_fixtures_list(sid, season_meta_row):
         "methods_tried": methods_tried,
         "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "fixtures": [
-            {"id": fx.get("id"), "name": fx.get("name"), "starting_at": fx.get("starting_at")}
+            {
+                "id": fx.get("id"),
+                "name": fx.get("name"),
+                "starting_at": fx.get("starting_at"),
+            }
             for fx in finished
             if fx.get("id")
         ],
@@ -951,7 +958,6 @@ def incremental_update(sid, season_meta_row, force_all=False):
     flist = fetch_season_fixtures_list(sid, season_meta_row)
     finished_ids = [f["id"] for f in flist.get("fixtures", [])]
     finished_count = len(finished_ids)
-    total_fetched = flist.get("total_fetched", 0)
 
     cached_ids, missing_ids = [], []
     for fid in finished_ids:
@@ -1134,14 +1140,11 @@ else:
         n_pos = len(by_pos[pos])
         is_small = n_pos < SMALL_SAMPLE_N
 
-        # Compare toggle
         do_compare = st.checkbox(T["compare"], value=False)
         selected_b = None
         if do_compare:
             peers = [
-                g
-                for g in by_pos[pos]
-                if player_key(g) != player_key(selected_a)
+                g for g in by_pos[pos] if player_key(g) != player_key(selected_a)
             ]
             peers.sort(key=lambda g: (g["Player"] or "").lower())
             if not peers:
@@ -1153,7 +1156,6 @@ else:
                 choice_b = st.selectbox(T["player_b"], labels_b, key="player_b")
                 selected_b = peers[labels_b.index(choice_b)]
 
-        # Header card(s)
         if selected_b is None:
             st.markdown(
                 f"""
@@ -1202,9 +1204,7 @@ else:
         st.markdown(f"##### {T['radar']}")
 
         radar_labels = [m["label"] for m in mdefs]
-        values_a = [
-            selected_a.get("pct", {}).get(m["key"]) or 0 for m in mdefs
-        ]
+        values_a = [selected_a.get("pct", {}).get(m["key"]) or 0 for m in mdefs]
         display_a = [
             fmt_radar_label(
                 selected_a["metrics"].get(m["key"]),
@@ -1212,12 +1212,9 @@ else:
             )
             for m in mdefs
         ]
-
         values_b = None
         if selected_b is not None:
-            values_b = [
-                selected_b.get("pct", {}).get(m["key"]) or 0 for m in mdefs
-            ]
+            values_b = [selected_b.get("pct", {}).get(m["key"]) or 0 for m in mdefs]
 
         sample_line = f"Sample: {pos}, ≥{int(min_min)} min (n={n_pos})"
         if is_small:
@@ -1225,7 +1222,7 @@ else:
 
         if selected_b is None:
             footnotes = [
-                f"Shape = percentile · Labels = Per90/% · {sample_line}",
+                f"Shape = percentile (0–100) · Labels = Per90/% · {sample_line}",
                 "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30",
                 "Per90 uses Minutes Played · Fixture aggregate",
                 f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
@@ -1245,7 +1242,7 @@ else:
             )
         else:
             footnotes = [
-                f"Overlay = percentile rank · Numbers in table below · {sample_line}",
+                f"Overlay = percentile rank (0–100) · Numbers in table · {sample_line}",
                 f"Navy = {selected_a['Player']} · Orange = {selected_b['Player']}",
                 "Same position only · Per90 uses Minutes Played · Fixture aggregate",
                 f"Superliga {season_name} · Superliga Radar · Data: Sportmonks API",
@@ -1286,9 +1283,7 @@ else:
         rows = []
         for m in mdefs:
             row = {"Metric": m["label"]}
-            row["A Per90/%"] = fmt_num(
-                selected_a["metrics"].get(m["key"]), "per90"
-            )
+            row["A Per90/%"] = fmt_num(selected_a["metrics"].get(m["key"]), "per90")
             row["A %ile"] = fmt_num(selected_a.get("pct", {}).get(m["key"]), "pct")
             if selected_b is not None:
                 row["B Per90/%"] = fmt_num(
@@ -1316,7 +1311,7 @@ else:
             rows.append(row)
 
         df = pd.DataFrame(rows)
-        pct_cols = [c for c in df.columns if "%ile" in c or c == "A %ile"]
+        pct_cols = [c for c in df.columns if "%ile" in c]
         if pct_cols:
             st.dataframe(
                 df.style.map(style_percentile_col, subset=pct_cols),
@@ -1328,9 +1323,9 @@ else:
 
 with st.expander(T["method_title"], expanded=False):
     st.markdown(
-        "同ポジション比較可 · 形=Percentile · 単体時のみ頂点にPer90"
+        "同ポジション比較可 · 形=Percentile(0–100) · 単体時のみ頂点にPer90"
         if not is_en
-        else "Same-position compare · Shape=percentile · Per90 labels in single view"
+        else "Same-position compare · Shape=percentile 0–100 · Per90 labels in single view"
     )
 
 with st.expander(T["admin_title"], expanded=False):
