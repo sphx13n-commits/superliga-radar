@@ -24,7 +24,7 @@ GRID = "#B8C7D9"
 AXIS = "#6B82A0"
 BG = "#EEF2F7"
 WHITE = "#FFFFFF"
-RING_100 = "#3D5A80"  # Percentile 100 の境界円
+RING_100 = "#3D5A80"
 MINUTES_TYPE_ID = 119
 LEAGUE_ID = 271
 CACHE_ROOT = Path(__file__).with_name("cache") / "superliga"
@@ -178,7 +178,7 @@ T = {
     "pct_body": (
         "Same-position ranking 0–100 under the minute filter.\n\n"
         "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30\n\n"
-        "Shape = percentile · Outer ring = 100 · Labels = Per90 (single view)."
+        "Shape = percentile · Bold ring = 100 · Labels = Per90 (single view)."
         if is_en
         else "同ポジション・出場時間条件での順位（0–100）。\n\n"
         "帯: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満\n\n"
@@ -353,30 +353,14 @@ def build_radar_figure(
 ):
     """
     形 = Percentile 0–100
-    軸 = 0–122（外側はラベル用余白）
-    太い円 = Percentile 100 の境界
+    軸 = 0–122（外側はラベル用）
+    太い線 = 100 の境界（カテゴリ軸で描画）
     """
     fig = go.Figure()
     n = len(labels)
     theta = labels + [labels[0]]
 
-    # --- Percentile 100 の境界円（先に描いて背面寄りに） ---
-    # 滑らかな円にするため点を多めに
-    ring_n = max(72, n * 8)
-    ring_theta = [i * (360.0 / ring_n) for i in range(ring_n + 1)]
-    ring_r = [100.0] * (ring_n + 1)
-    fig.add_trace(
-        go.Scatterpolar(
-            r=ring_r,
-            theta=ring_theta,
-            mode="lines",
-            line={"color": RING_100, "width": 2.4},
-            hoverinfo="skip",
-            showlegend=False,
-        )
-    )
-
-    # Player A
+    # 1) データ先（カテゴリ軸を確定）
     r_a = values_a + [values_a[0]]
     fig.add_trace(
         go.Scatterpolar(
@@ -412,17 +396,27 @@ def build_radar_figure(
             )
         )
 
-    # 単体時のみ Per90（100の外側）
+    # 2) Percentile 100 境界（同じ labels＝カテゴリ。数値の度は使わない）
+    fig.add_trace(
+        go.Scatterpolar(
+            r=[100.0] * (n + 1),
+            theta=theta,
+            mode="lines",
+            line={"color": RING_100, "width": 2.6},
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
+
+    # 3) 単体時のみ Per90
     if values_b is None and display_texts is not None:
         OUTER_R = 108
-        r_text = [OUTER_R] * n + [OUTER_R]
-        text_closed = list(display_texts) + [display_texts[0]]
         fig.add_trace(
             go.Scatterpolar(
-                r=r_text,
+                r=[OUTER_R] * (n + 1),
                 theta=theta,
                 mode="text",
-                text=text_closed,
+                text=list(display_texts) + [display_texts[0]],
                 textfont={
                     "size": 18,
                     "color": NAVY,
@@ -1305,7 +1299,7 @@ with st.expander(T["method_title"], expanded=False):
     st.markdown(
         "形=Percentile(0–100) · 太い円=100の上限 · 外側はPer90用余白"
         if not is_en
-        else "Shape=percentile 0–100 · Bold ring=100 ceiling · Outer margin for Per90 labels"
+        else "Shape=percentile 0–100 · Bold ring=100 · Outer margin for Per90 labels"
     )
 
 with st.expander(T["admin_title"], expanded=False):
