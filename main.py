@@ -26,8 +26,8 @@ MINUTES_TYPE_ID = 119
 LEAGUE_ID = 271
 CACHE_ROOT = Path(__file__).with_name("cache") / "superliga"
 POSITION_MAP = {24: "GK", 25: "DEF", 26: "MID", 27: "FWD"}
-# Sportmonks fixtures/between は最大100日。余裕を見て90日
 MAX_BETWEEN_DAYS = 90
+MAX_SEASONS = 3  # 選択肢は直近3シーズンのみ
 
 BAND_ELITE = "#5C7A9A"
 BAND_STRONG = "#8BB0F5"
@@ -330,7 +330,6 @@ def _parse_ymd(s):
 
 
 def _date_chunks(start_s, end_s, max_days=MAX_BETWEEN_DAYS):
-    """start〜end を max_days 以下の区間に分割。"""
     start = _parse_ymd(start_s)
     end = _parse_ymd(end_s)
     if end < start:
@@ -538,7 +537,7 @@ def style_percentile_col(val):
     return f"background-color: {color}; color: {text}; font-weight: 700;"
 
 
-# ----- season list -----
+# ----- season list（直近 MAX_SEASONS のみ） -----
 league_res = requests.get(
     f"{base_url}/leagues/{LEAGUE_ID}",
     headers=headers,
@@ -556,17 +555,31 @@ season_records = [
 ]
 if not season_records and current_season.get("id"):
     season_records = [current_season]
+
+# 新しい順（現在シーズン優先 → starting_at 新しい順）
 season_records.sort(
-    key=lambda s: (s.get("id") == current_season.get("id"), s.get("starting_at", "")),
+    key=lambda s: (
+        s.get("id") == current_season.get("id"),
+        s.get("starting_at") or "",
+    ),
     reverse=True,
 )
+# 直近 N シーズンだけ残す
+season_records = season_records[:MAX_SEASONS]
+
 season_options = {s["name"]: s["id"] for s in season_records}
 season_meta = {s["id"]: s for s in season_records}
 season_names = list(season_options)
+
 default_name = next(
     (s["name"] for s in season_records if s["id"] == default_season_id),
-    current_season.get("name", season_names[0]),
+    None,
 )
+if default_name is None:
+    default_name = next(
+        (s["name"] for s in season_records if s["id"] == current_season.get("id")),
+        season_names[0] if season_names else "",
+    )
 
 st.markdown(f"##### {T['season']}")
 selected_season_name = st.selectbox(
@@ -600,7 +613,6 @@ team_id_to_name = {
 
 
 def _paginate_fixtures_window(start, end, filter_str=None):
-    """1つの日付ウィンドウ（≤100日）をページング取得。"""
     all_fx, page, errors = [], 1, 0
     last_status = None
     error_body = None
@@ -640,9 +652,6 @@ def _paginate_fixtures_window(start, end, filter_str=None):
 
 
 def _fetch_between_chunked(start_s, end_s, filter_str=None):
-    """
-    100日制限対応: 日付を分割して between を呼び、結合する。
-    """
     chunks = _date_chunks(start_s, end_s, MAX_BETWEEN_DAYS)
     all_fx = []
     seen_ids = set()
@@ -690,7 +699,6 @@ def fetch_season_fixtures_list(sid, season_meta_row):
 
     today = date.today().isoformat()
     wide_start = start
-    # 進行中シーズンは今日まで。過去シーズンは ending_at まで
     wide_end = min(end, today) if end else today
     if wide_end < wide_start:
         wide_end = wide_start
@@ -698,7 +706,6 @@ def fetch_season_fixtures_list(sid, season_meta_row):
     methods_tried = []
     all_fx, errors, http_status, err_body = [], 0, None, None
 
-    # A: fixtureSeasons + 日付チャンク
     fx_a, err_a, st_a, body_a, win_a = _fetch_between_chunked(
         wide_start, wide_end, f"fixtureSeasons:{sid}"
     )
@@ -717,7 +724,6 @@ def fetch_season_fixtures_list(sid, season_meta_row):
     )
     all_fx, errors, http_status, err_body = fx_a, err_a, st_a, body_a
 
-    # B: fixtureLeagues + チャンク（フォールバック）
     if len(all_fx) == 0:
         fx_b, err_b, st_b, body_b, win_b = _fetch_between_chunked(
             wide_start, wide_end, f"fixtureLeagues:{LEAGUE_ID}"
