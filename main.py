@@ -83,7 +83,6 @@ def fmt_radar_label(v, is_ratio=False):
     return s.rstrip("0").rstrip(".") or "0"
 
 
-# GK: 変更なし / MID・DEF・FWD: 各10本
 POSITION_METRICS = {
     "GK": [
         {"key": "saves_p90", "label": "Saves/90", "tid": 57, "kind": "per90"},
@@ -200,6 +199,7 @@ T = {
     "skip_ok": "No new fixtures · using existing aggregate"
     if is_en
     else "新規なし · 既存Aggregateを使用",
+    "season_loading": "Loading season data..." if is_en else "シーズンデータを読み込み中...",
 }
 
 st.markdown(
@@ -431,7 +431,6 @@ def build_radar_figure(labels, values, title_lines, marker_colors, footnotes, di
             }
         )
 
-    # 10軸でも見切れにくいよう余白をやや広め
     fig.update_layout(
         height=1500,
         width=1200,
@@ -513,7 +512,7 @@ def style_percentile_col(val):
     return f"background-color: {color}; color: {text}; font-weight: 700;"
 
 
-# ----- season -----
+# ----- season list -----
 league_res = requests.get(
     f"{base_url}/leagues/{LEAGUE_ID}",
     headers=headers,
@@ -547,13 +546,21 @@ st.markdown(f"##### {T['season']}")
 selected_season_name = st.selectbox(
     T["season"],
     season_names,
-    index=season_names.index(default_name),
+    index=season_names.index(default_name) if default_name in season_names else 0,
     label_visibility="collapsed",
 )
 season_id = season_options[selected_season_name]
 season_name = selected_season_name
 season_info = season_meta.get(season_id, {})
 
+# ----- シーズン切替検知：前シーズンの session データを破棄 -----
+if st.session_state.get("loaded_season_id") != season_id:
+    st.session_state.fx_aggs = None
+    st.session_state.fx_status = None
+    st.session_state.fx_errors = []
+    st.session_state.loaded_season_id = season_id
+
+# 選択シーズンのチーム一覧
 teams_res = requests.get(
     f"{base_url}/teams/seasons/{season_id}",
     headers=headers,
@@ -561,11 +568,15 @@ teams_res = requests.get(
     timeout=30,
 )
 teams = teams_res.json().get("data", []) if teams_res.status_code == 200 else []
-team_id_to_name = {t.get("id"): t.get("name") for t in teams if t.get("id")}
+team_id_to_name = {
+    t.get("id"): (t.get("name") or str(t.get("id")))
+    for t in teams
+    if t.get("id") is not None
+}
 
 
 def fetch_season_fixtures_list(sid, season_meta_row):
-    start = (season_meta_row.get("starting_at") or "2026-07-01")[:10]
+    start = (season_meta_row.get("starting_at") or "2024-07-01")[:10]
     end = (season_meta_row.get("ending_at") or "2027-06-30")[:10]
     today = date.today().isoformat()
     if end > today:
@@ -591,7 +602,7 @@ def fetch_season_fixtures_list(sid, season_meta_row):
         if not (body.get("pagination") or {}).get("has_more"):
             break
         page += 1
-        if page > 30:
+        if page > 40:
             break
         time.sleep(0.08)
     finished = [fx for fx in all_fx if _is_finished_fixture(fx)]
@@ -696,6 +707,9 @@ def restore_aggs_from_file(sid):
     cached = _load_json(_cache_dir(sid) / "player_team_aggregate.json")
     if not cached:
         return None, None
+    # シーズン不一致のキャッシュは使わない
+    if cached.get("season_id") not in (None, sid) and int(cached.get("season_id") or 0) != int(sid):
+        return None, None
     players = cached.get("players")
     if not isinstance(players, list):
         return None, None
@@ -738,6 +752,7 @@ def restore_aggs_from_file(sid):
         "from_cache_file": True,
         "mode": "cache_file",
         "errors": 0,
+        "season_id": sid,
     }
     return restored, meta
 
@@ -820,6 +835,7 @@ def incremental_update(sid, season_meta_row, force_all=False):
                 "players": len(aggs),
                 "updated_at": (meta or {}).get("updated_at"),
                 "mode": "incremental_skip_rebuild",
+                "season_id": sid,
             }
             return aggs, status, errors
 
@@ -834,23 +850,26 @@ def incremental_update(sid, season_meta_row, force_all=False):
         "players": len(aggs),
         "fixtures": len(loaded),
         "mode": "rebuild",
+        "season_id": sid,
     }
     save_aggs(sid, aggs, status)
     return aggs, status, errors
 
 
-if "fx_aggs" not in st.session_state or st.session_state.fx_aggs is None:
-    aggs, meta = restore_aggs_from_file(season_id)
-    if aggs is not None:
-        st.session_state.fx_aggs = aggs
-        st.session_state.fx_status = meta or {
-            "from_cache_file": True,
-            "players": len(aggs),
-            "mode": "cache_file",
-        }
-        st.session_state.fx_errors = []
-    else:
-        with st.spinner(T["updating"]):
+# ----- 選択シーズンのデータをロード -----
+if st.session_state.get("fx_aggs") is None:
+    with st.spinner(T["season_loading"]):
+        aggs, meta = restore_aggs_from_file(season_id)
+        if aggs is not None:
+            st.session_state.fx_aggs = aggs
+            st.session_state.fx_status = meta or {
+                "from_cache_file": True,
+                "players": len(aggs),
+                "mode": "cache_file",
+                "season_id": season_id,
+            }
+            st.session_state.fx_errors = []
+        else:
             aggs, status, errors = incremental_update(
                 season_id, season_info, force_all=False
             )
@@ -865,7 +884,8 @@ errors = st.session_state.get("fx_errors") or []
 updated_disp = format_updated_at(status.get("updated_at"))
 st.caption(
     f"{T['connected']} · {T['last_updated']}: **{updated_disp}** · "
-    f"Players: {status.get('players') or (len(aggs) if aggs else 0)}"
+    f"Players: {status.get('players') or (len(aggs) if aggs else 0)} · "
+    f"Season ID: {season_id}"
 )
 
 if not aggs:
@@ -885,10 +905,13 @@ else:
         if pos not in by_pos:
             continue
         metrics = compute_metrics(a["raw"], mins, POSITION_METRICS[pos])
+        team_name = team_id_to_name.get(a["team_id"])
+        if not team_name:
+            team_name = str(a["team_id"]) if a["team_id"] is not None else "Unknown"
         by_pos[pos].append(
             {
-                "Player": a["player_name"],
-                "Team": team_id_to_name.get(a["team_id"], a["team_id"]),
+                "Player": a["player_name"] or f"id:{a['player_id']}",
+                "Team": team_name,
                 "Pos": pos,
                 "Minutes": int(round(mins)),
                 "Apps": a["apps"],
@@ -912,7 +935,10 @@ else:
                 )
 
     all_players = [g for pos in by_pos.values() for g in pos]
-    teams_in = sorted({g["Team"] for g in all_players if g["Team"]})
+    # None / 型混在で sorted が落ちないようにする
+    teams_in = sorted(
+        {str(g["Team"]) for g in all_players if g.get("Team") not in (None, "")}
+    )
     with f2:
         team_filter = st.selectbox(T["team"], [T["all_teams"]] + teams_in)
     if team_filter != T["all_teams"]:
@@ -1086,6 +1112,7 @@ with st.expander(T["admin_title"], expanded=False):
             st.session_state.fx_aggs = aggs2
             st.session_state.fx_status = status2
             st.session_state.fx_errors = errors2
+            st.session_state.loaded_season_id = season_id
             if status2.get("aggregate_rebuilt"):
                 st.success(
                     f"{T['rebuild_ok']} · new={status2.get('new_fetched', 0)} · "
@@ -1100,6 +1127,7 @@ with st.expander(T["admin_title"], expanded=False):
     st.markdown(f"**{T['status_title']}**")
     st.write(
         {
+            "season_id": season_id,
             "finished_fixtures": status.get("finished_fixtures"),
             "cached_fixtures": status.get("cached_fixtures"),
             "new_fetched": status.get("new_fetched"),
