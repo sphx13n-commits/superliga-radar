@@ -126,6 +126,26 @@ def short_name(name, n=14):
     return name if len(name) <= n else name[: n - 1] + "…"
 
 
+def calc_age(dob_str, as_of):
+    """満年齢。dob_str は YYYY-MM-DD。欠損は None。"""
+    if not dob_str or as_of is None:
+        return None
+    try:
+        dob = datetime.strptime(str(dob_str)[:10], "%Y-%m-%d").date()
+        age = as_of.year - dob.year
+        if (as_of.month, as_of.day) < (dob.month, dob.day):
+            age -= 1
+        if age < 0 or age > 60:
+            return None
+        return int(age)
+    except Exception:
+        return None
+
+
+def fmt_age(age):
+    return "—" if age is None else str(int(age))
+
+
 POSITION_METRICS = {
     "GK": [
         {"key": "saves_p90", "label": "Saves/90", "tid": 57, "kind": "per90"},
@@ -262,6 +282,8 @@ T = {
     "top_n": "Show top" if is_en else "表示件数",
     "similarity": "Similarity" if is_en else "類似度",
     "no_similar": "Not enough players to compare." if is_en else "比較できる選手が足りません。",
+    "age": "Age" if is_en else "年齢",
+    "ages_loading": "Loading player ages..." if is_en else "年齢データを取得中...",
 }
 
 st.markdown(
@@ -401,6 +423,85 @@ def format_updated_at(iso_str):
         return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     except Exception:
         return str(iso_str)[:19]
+
+
+def as_of_date_from_status(status_obj):
+    """年齢起算日 = データ抽出日（updated_at）。なければ今日。"""
+    iso = (status_obj or {}).get("updated_at")
+    if iso:
+        try:
+            s = str(iso).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s)
+            return dt.date()
+        except Exception:
+            pass
+    return date.today()
+
+
+def players_meta_path():
+    CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+    return CACHE_ROOT / "players_meta.json"
+
+
+def load_players_meta():
+    data = _load_json(players_meta_path())
+    return data if isinstance(data, dict) else {}
+
+
+def save_players_meta(meta):
+    _save_json(players_meta_path(), meta)
+
+
+def fetch_player_dob(player_id):
+    try:
+        res = requests.get(
+            f"{base_url}/players/{player_id}",
+            headers=headers,
+            params=params,
+            timeout=20,
+        )
+        if res.status_code != 200:
+            return None
+        data = (res.json() or {}).get("data") or {}
+        dob = data.get("date_of_birth") or data.get("birthday") or data.get("birthdate")
+        return str(dob)[:10] if dob else None
+    except Exception:
+        return None
+
+
+def ensure_player_ages(aggs, show_spinner=True):
+    """未取得の選手生年月日をAPI取得して players_meta に保存。"""
+    meta = load_players_meta()
+    needed = set()
+    for a in (aggs or {}).values():
+        pid = a.get("player_id")
+        if pid is None:
+            continue
+        key = str(pid)
+        if key not in meta or not (meta[key] or {}).get("dob"):
+            needed.add(int(pid))
+
+    if not needed:
+        return meta
+
+    spinner_ctx = st.spinner(T["ages_loading"]) if show_spinner else nullcontext()
+    with spinner_ctx:
+        for i, pid in enumerate(sorted(needed)):
+            dob = fetch_player_dob(pid)
+            meta[str(pid)] = {"dob": dob, "fetched_at": datetime.now(timezone.utc).isoformat()}
+            if (i + 1) % 20 == 0:
+                save_players_meta(meta)
+            time.sleep(0.05)
+        save_players_meta(meta)
+    return meta
+
+
+class nullcontext:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
 
 
 def _parse_ymd(s):
@@ -720,7 +821,9 @@ def similarity_score(vec_a, vec_b):
     return round(max(0.0, 100.0 * (1.0 - dist / max_dist)), 1)
 
 
-def build_position_pools(aggs, team_id_to_name, min_min):
+def build_position_pools(aggs, team_id_to_name, min_min, players_meta=None, as_of=None):
+    players_meta = players_meta or {}
+    as_of = as_of or date.today()
     by_pos = {p: [] for p in POSITIONS}
     for a in aggs.values():
         mins = a["minutes"]
@@ -733,14 +836,21 @@ def build_position_pools(aggs, team_id_to_name, min_min):
         team_name = team_id_to_name.get(a["team_id"]) or (
             str(a["team_id"]) if a["team_id"] is not None else "Unknown"
         )
+        pid = a.get("player_id")
+        dob = None
+        if pid is not None:
+            dob = (players_meta.get(str(pid)) or {}).get("dob")
+        age = calc_age(dob, as_of)
         by_pos[pos].append(
             {
                 "Player": a["player_name"] or f"id:{a['player_id']}",
+                "PlayerId": pid,
                 "Team": team_name,
                 "TeamId": a["team_id"],
                 "Pos": pos,
                 "Minutes": int(round(mins)),
                 "Apps": a["apps"],
+                "Age": age,
                 "metrics": metrics,
                 "raw": a["raw"],
             }
@@ -762,12 +872,12 @@ def build_position_pools(aggs, team_id_to_name, min_min):
     return by_pos
 
 
-def get_pools_cached(season_id, min_min, aggs, team_id_to_name):
-    key = f"pools_{season_id}_{int(min_min)}"
+def get_pools_cached(season_id, min_min, aggs, team_id_to_name, players_meta, as_of):
+    key = f"pools_{season_id}_{int(min_min)}_{as_of.isoformat()}"
     if st.session_state.get("_pools_key") != key or "pools_data" not in st.session_state:
         st.session_state["_pools_key"] = key
         st.session_state["pools_data"] = build_position_pools(
-            aggs, team_id_to_name, min_min
+            aggs, team_id_to_name, min_min, players_meta, as_of
         )
     return st.session_state["pools_data"]
 
@@ -1221,6 +1331,7 @@ if st.session_state.get("fx_aggs") is None:
 
 aggs = st.session_state.get("fx_aggs")
 status = st.session_state.get("fx_status") or {}
+as_of = as_of_date_from_status(status)
 
 st.caption(
     f"{T['connected']} · {T['last_updated']}: **{format_updated_at(status.get('updated_at'))}** · "
@@ -1230,6 +1341,9 @@ st.caption(
 if not aggs:
     st.warning(T["no_fixtures"] if status.get("finished_fixtures") == 0 else T["no_data"])
     st.stop()
+
+# 年齢メタ（未取得分のみAPI）
+players_meta = ensure_player_ages(aggs, show_spinner=True)
 
 tab_radar, tab_compare, tab_discover, tab_similar = st.tabs(
     [T["tab_radar"], T["tab_compare"], T["tab_discover"], T["tab_similar"]]
@@ -1242,7 +1356,9 @@ with tab_radar:
         min_min_r = st.selectbox(
             T["min_minutes"], [0, 300, 600, 900], index=1, key="radar_min"
         )
-    by_pos_r = get_pools_cached(season_id, min_min_r, aggs, team_id_to_name)
+    by_pos_r = get_pools_cached(
+        season_id, min_min_r, aggs, team_id_to_name, players_meta, as_of
+    )
     all_r = [g for pos in by_pos_r.values() for g in pos]
     teams_r = sorted({str(g["Team"]) for g in all_r if g.get("Team")})
     with f2:
@@ -1276,6 +1392,7 @@ with tab_radar:
         mdefs = POSITION_METRICS[pos]
         n_pos = len(by_pos_r[pos])
         is_small = n_pos < SMALL_SAMPLE_N
+        age_str = fmt_age(sel.get("Age"))
 
         club_uri = None
         url = team_id_to_logo.get(sel.get("TeamId"))
@@ -1294,7 +1411,7 @@ with tab_radar:
               <div>
                 <div style="font-size:22px;font-weight:750;color:{NAVY};">{sel['Player']}</div>
                 <div style="margin-top:6px;color:#334155;font-size:14px;">
-                  {sel['Team']} · <b>{pos}</b> · {sel['Minutes']} min · {T['apps']} {sel['Apps']}
+                  {sel['Team']} · <b>{pos}</b> · {age_str} · {sel['Minutes']} min · {T['apps']} {sel['Apps']}
                 </div>
                 <div style="margin-top:4px;color:#64748B;font-size:12px;">Superliga {season_name}</div>
               </div>
@@ -1330,9 +1447,10 @@ with tab_radar:
             "Per90 = Minutes Played · Fixture aggregate · Sportmonks",
             f"Superliga {season_name} · Superliga Radar · @Dalaprospect",
         ]
+        # 画像2行目: チーム | ポジション | 年齢(数字のみ) | 出場分
         title_lines = [
             sel["Player"],
-            f"{sel['Team']} | {pos} | {sel['Minutes']} min",
+            f"{sel['Team']} | {pos} | {age_str} | {sel['Minutes']} min",
             f"Superliga {season_name} · Percentile radar",
         ]
         fig = build_radar_figure(
@@ -1390,7 +1508,9 @@ with tab_compare:
     with c2:
         pos_c = st.selectbox(T["position"], list(POSITIONS), index=2, key="cmp_pos")
 
-    by_pos_c = get_pools_cached(season_id, min_min_c, aggs, team_id_to_name)
+    by_pos_c = get_pools_cached(
+        season_id, min_min_c, aggs, team_id_to_name, players_meta, as_of
+    )
     pool = by_pos_c[pos_c]
     n_pos = len(pool)
     if 0 < n_pos < SMALL_SAMPLE_N:
@@ -1522,7 +1642,9 @@ with tab_discover:
         min_min_d = st.selectbox(
             T["min_minutes"], [0, 300, 600, 900], index=1, key="disc_min"
         )
-    by_pos_d = get_pools_cached(season_id, min_min_d, aggs, team_id_to_name)
+    by_pos_d = get_pools_cached(
+        season_id, min_min_d, aggs, team_id_to_name, players_meta, as_of
+    )
     pool_d = by_pos_d[pos_d]
     teams_d = sorted({str(g["Team"]) for g in pool_d if g.get("Team")})
     with d3:
@@ -1589,6 +1711,7 @@ with tab_discover:
                 row = {
                     "Player": g["Player"],
                     "Team": g["Team"],
+                    T["age"]: fmt_age(g.get("Age")),
                     "Pos": g["Pos"],
                     "Minutes": g["Minutes"],
                 }
@@ -1625,7 +1748,9 @@ with tab_similar:
         min_min_s = st.selectbox(
             T["min_minutes"], [0, 300, 600, 900], index=1, key="sim_min"
         )
-    by_pos_s = get_pools_cached(season_id, min_min_s, aggs, team_id_to_name)
+    by_pos_s = get_pools_cached(
+        season_id, min_min_s, aggs, team_id_to_name, players_meta, as_of
+    )
     pool_s = by_pos_s[pos_s]
     teams_s = sorted({str(g["Team"]) for g in pool_s if g.get("Team")})
     with s3:
@@ -1668,11 +1793,11 @@ with tab_similar:
             st.warning(T["no_similar"])
         else:
             rows = []
-            # 先頭: 基準選手（類似度は文字列整形）
             ref_row = {
                 "#": "★",
                 "Player": ref["Player"],
                 "Team": ref["Team"],
+                T["age"]: fmt_age(ref.get("Age")),
                 "Minutes": ref["Minutes"],
                 T["similarity"]: fmt_num(100, "pct"),
             }
@@ -1687,6 +1812,7 @@ with tab_similar:
                     "#": rank,
                     "Player": g["Player"],
                     "Team": g["Team"],
+                    T["age"]: fmt_age(g.get("Age")),
                     "Minutes": g["Minutes"],
                     T["similarity"]: fmt_num(sim, "pct"),
                 }
@@ -1722,9 +1848,9 @@ with tab_similar:
 
 with st.expander(T["method_title"], expanded=False):
     st.markdown(
-        "形=Percentile · 類似度=同ポジションのPercentileベクトル距離 · ★=基準選手"
+        "形=Percentile · 類似度=同ポジションのPercentileベクトル距離 · 年齢=データ抽出日時点"
         if not is_en
-        else "Shape=percentile · Similarity=percentile-vector distance · ★=reference"
+        else "Shape=percentile · Similarity=percentile-vector distance · Age=as of data extract date"
     )
 
 with st.expander(T["admin_title"], expanded=False):
@@ -1747,5 +1873,6 @@ with st.expander(T["admin_title"], expanded=False):
             "players": status.get("players") or (len(aggs) if aggs else 0),
             "updated_at": status.get("updated_at"),
             "mode": status.get("mode"),
+            "age_as_of": as_of.isoformat(),
         }
     )
