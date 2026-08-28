@@ -1,4 +1,5 @@
 import base64
+import io
 import json
 import math
 import os
@@ -6,6 +7,11 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import requests
@@ -109,10 +115,7 @@ def fmt_radar_label(v, is_ratio=False):
         x = float(v)
     except (TypeError, ValueError):
         return str(v)
-    if is_ratio:
-        s = f"{x:.1f}"
-    else:
-        s = f"{x:.1f}" if abs(x) >= 10 else f"{x:.2f}"
+    s = f"{x:.1f}" if is_ratio or abs(x) >= 10 else f"{x:.2f}"
     return s.rstrip("0").rstrip(".") or "0"
 
 
@@ -402,8 +405,7 @@ def fetch_image_data_uri(url: str):
             mime = "image/svg+xml"
         else:
             mime = "image/png"
-        b64 = base64.b64encode(r.content).decode("ascii")
-        return f"data:{mime};base64,{b64}"
+        return f"data:{mime};base64,{base64.b64encode(r.content).decode('ascii')}"
     except Exception:
         return None
 
@@ -426,8 +428,7 @@ def as_of_date_from_status(status_obj):
     if iso:
         try:
             s = str(iso).replace("Z", "+00:00")
-            dt = datetime.fromisoformat(s)
-            return dt.date()
+            return datetime.fromisoformat(s).date()
         except Exception:
             pass
     return date.today()
@@ -479,17 +480,15 @@ def ensure_player_ages(aggs, show_spinner=True):
         pid = a.get("player_id")
         if pid is None:
             continue
-        key = str(pid)
-        if key not in meta or not (meta[key] or {}).get("dob"):
+        if str(pid) not in meta or not (meta[str(pid)] or {}).get("dob"):
             needed.add(int(pid))
     if not needed:
         return meta
-    spinner_ctx = st.spinner(T["ages_loading"]) if show_spinner else nullcontext()
-    with spinner_ctx:
+    ctx = st.spinner(T["ages_loading"]) if show_spinner else nullcontext()
+    with ctx:
         for i, pid in enumerate(sorted(needed)):
-            dob = fetch_player_dob(pid)
             meta[str(pid)] = {
-                "dob": dob,
+                "dob": fetch_player_dob(pid),
                 "fetched_at": datetime.now(timezone.utc).isoformat(),
             }
             if (i + 1) % 20 == 0:
@@ -508,8 +507,7 @@ def _date_chunks(start_s, end_s, max_days=MAX_BETWEEN_DAYS):
     end = _parse_ymd(end_s)
     if end < start:
         end = start
-    chunks = []
-    cur = start
+    chunks, cur = [], start
     while cur <= end:
         chunk_end = min(cur + timedelta(days=max_days - 1), end)
         chunks.append((cur.isoformat(), chunk_end.isoformat()))
@@ -517,88 +515,7 @@ def _date_chunks(start_s, end_s, max_days=MAX_BETWEEN_DAYS):
     return chunks
 
 
-def _radar_traces(
-    labels,
-    values_a,
-    display_texts=None,
-    values_b=None,
-    name_a=None,
-    name_b=None,
-    marker_colors_a=None,
-    compact=False,
-):
-    traces = []
-    n = len(labels)
-    theta = labels + [labels[0]]
-    if marker_colors_a and values_b is None:
-        m_colors = list(marker_colors_a) + [marker_colors_a[0]]
-    else:
-        m_colors = NAVY
-    traces.append(
-        go.Scatterpolar(
-            r=values_a + [values_a[0]],
-            theta=theta,
-            fill="toself",
-            fillcolor=NAVY_SOFT,
-            line={"color": NAVY, "width": 2.8 if compact else 3.4},
-            marker={
-                "color": m_colors,
-                "size": 11 if compact else 16,
-                "line": {"color": NAVY, "width": 1.4},
-            },
-            mode="lines+markers",
-            name=name_a or "A",
-            hovertemplate="%{theta}: %{r:.0f}<extra>" + (name_a or "A") + "</extra>",
-        )
-    )
-    if values_b is not None:
-        traces.append(
-            go.Scatterpolar(
-                r=values_b + [values_b[0]],
-                theta=theta,
-                fill="toself",
-                fillcolor=ACCENT_SOFT,
-                line={"color": ACCENT, "width": 2.8 if compact else 3.4},
-                marker={
-                    "color": ACCENT,
-                    "size": 11 if compact else 16,
-                    "line": {"color": WHITE, "width": 1.2},
-                },
-                mode="lines+markers",
-                name=name_b or "B",
-                hovertemplate="%{theta}: %{r:.0f}<extra>" + (name_b or "B") + "</extra>",
-            )
-        )
-    traces.append(
-        go.Scatterpolar(
-            r=[100.0] * (n + 1),
-            theta=theta,
-            mode="lines",
-            line={"color": RING_100, "width": 2.2 if compact else 2.6},
-            hoverinfo="skip",
-            showlegend=False,
-        )
-    )
-    if values_b is None and display_texts is not None:
-        traces.append(
-            go.Scatterpolar(
-                r=[108] * (n + 1),
-                theta=theta,
-                mode="text",
-                text=list(display_texts) + [display_texts[0]],
-                textfont={
-                    "size": 12 if compact else 18,
-                    "color": NAVY,
-                    "family": "Arial Black, Arial, sans-serif",
-                },
-                hoverinfo="skip",
-                showlegend=False,
-            )
-        )
-    return traces
-
-
-def build_radar_figure(
+def build_radar_png(
     labels,
     values_a,
     title_lines,
@@ -608,222 +525,110 @@ def build_radar_figure(
     name_a=None,
     name_b=None,
     marker_colors_a=None,
-    club_logo_uri=None,
-    mode="export",
 ):
-    fig = go.Figure()
-    compact = mode == "web"
-    for tr in _radar_traces(
-        labels,
-        values_a,
-        display_texts=display_texts,
-        values_b=values_b,
-        name_a=name_a,
-        name_b=name_b,
-        marker_colors_a=marker_colors_a,
-        compact=compact,
-    ):
-        fig.add_trace(tr)
+    """MatplotlibでPNGを生成。長押し保存用。"""
+    n = max(len(labels), 1)
+    angles = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist()
+    angles += angles[:1]
 
-    annotations = []
-    images = []
+    def closed(vals):
+        vals = [float(v or 0) for v in vals]
+        return vals + vals[:1]
 
-    if mode == "web":
-        if values_b is not None:
-            annotations.append(
-                {
-                    "text": (
-                        f"<span style='color:{NAVY}'><b>■ {name_a}</b></span>"
-                        f"　<span style='color:{ACCENT}'><b>■ {name_b}</b></span>"
-                    ),
-                    "xref": "paper",
-                    "yref": "paper",
-                    "x": 0.5,
-                    "y": 0.02,
-                    "xanchor": "center",
-                    "yanchor": "bottom",
-                    "showarrow": False,
-                    "font": {"size": 12, "family": "Arial"},
-                }
+    fig = plt.figure(figsize=(9.0, 12.0), dpi=140, facecolor="white")
+    fig.text(
+        0.50,
+        0.965,
+        title_lines[0] if title_lines else "",
+        ha="center",
+        va="top",
+        fontsize=20,
+        fontweight="bold",
+        color=NAVY,
+    )
+    if len(title_lines) > 1:
+        fig.text(0.50, 0.932, title_lines[1], ha="center", va="top", fontsize=12, color=NAVY)
+    if len(title_lines) > 2:
+        fig.text(0.50, 0.908, title_lines[2], ha="center", va="top", fontsize=10, color="#64748B")
+
+    ax = fig.add_axes([0.10, 0.18, 0.80, 0.68], polar=True)
+    ax.set_facecolor("#EEF2F7")
+    ax.set_theta_offset(np.pi / 2)
+    ax.set_theta_direction(-1)
+    ax.set_ylim(0, 122)
+    ax.set_yticks([20, 40, 60, 80, 100])
+    ax.set_yticklabels(["20", "40", "60", "80", "100"], color=AXIS, fontsize=8)
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(labels, color=NAVY, fontsize=9)
+    ax.spines["polar"].set_color(AXIS)
+    ax.grid(color=GRID, linewidth=0.8)
+    ax.plot(angles, [100] * (n + 1), color=RING_100, linewidth=1.6)
+
+    r_a = closed(values_a)
+    ax.plot(angles, r_a, color=NAVY, linewidth=2.2)
+    ax.fill(angles, r_a, color=NAVY, alpha=0.28)
+    point_colors = marker_colors_a if (marker_colors_a and values_b is None) else [NAVY] * n
+    ax.scatter(angles[:-1], r_a[:-1], c=point_colors, s=36, zorder=5, edgecolors=NAVY, linewidths=0.8)
+
+    if values_b is not None:
+        r_b = closed(values_b)
+        ax.plot(angles, r_b, color=ACCENT, linewidth=2.2)
+        ax.fill(angles, r_b, color=ACCENT, alpha=0.22)
+        ax.scatter(angles[:-1], r_b[:-1], c=ACCENT, s=36, zorder=5, edgecolors="white", linewidths=0.8)
+        fig.text(
+            0.50,
+            0.155,
+            f"■ {name_a or 'A'}          ■ {name_b or 'B'}",
+            ha="center",
+            va="top",
+            fontsize=10,
+            color=NAVY,
+        )
+
+    if values_b is None and display_texts:
+        for ang, txt in zip(angles[:-1], display_texts):
+            ax.text(
+                ang,
+                112,
+                str(txt),
+                ha="center",
+                va="center",
+                fontsize=8,
+                color=NAVY,
+                fontweight="bold",
             )
-        fig.update_layout(
-            height=520,
-            margin={"l": 30, "r": 30, "t": 20, "b": 40 if values_b is not None else 20},
-            paper_bgcolor=WHITE,
-            plot_bgcolor=WHITE,
-            showlegend=False,
-            annotations=annotations,
-            polar={
-                "domain": {"x": [0.0, 1.0], "y": [0.06 if values_b else 0.0, 1.0]},
-                "bgcolor": BG,
-                "radialaxis": {
-                    "visible": True,
-                    "range": [0, 122],
-                    "tickvals": [0, 20, 40, 60, 80, 100],
-                    "gridcolor": GRID,
-                    "linecolor": AXIS,
-                    "tickfont": {"color": AXIS, "size": 10},
-                },
-                "angularaxis": {
-                    "gridcolor": GRID,
-                    "linecolor": AXIS,
-                    "tickfont": {"color": NAVY, "size": 11, "family": "Arial"},
-                    "rotation": 90,
-                    "direction": "clockwise",
-                },
-            },
-        )
-        return fig
 
-    n = len(labels)
-    if values_b is not None:
-        title_sizes = [32, 18, 14]
-        title_ys = [0.975, 0.935, 0.905]
-    else:
-        title_sizes = [44, 20, 16]
-        title_ys = [0.985, 0.938, 0.905]
-    for i, line in enumerate(title_lines):
-        annotations.append(
-            {
-                "text": f"<b>{line}</b>" if i == 0 else line,
-                "xref": "paper",
-                "yref": "paper",
-                "x": 0.5,
-                "y": title_ys[i] if i < len(title_ys) else 0.88,
-                "xanchor": "center",
-                "yanchor": "top",
-                "showarrow": False,
-                "font": {
-                    "color": NAVY,
-                    "size": title_sizes[i] if i < len(title_sizes) else 15,
-                    "family": "Arial",
-                },
-            }
-        )
-    if values_b is not None:
-        annotations.append(
-            {
-                "text": (
-                    f"<span style='color:{NAVY}'><b>■ {name_a}</b></span>"
-                    f"　　<span style='color:{ACCENT}'><b>■ {name_b}</b></span>"
-                ),
-                "xref": "paper",
-                "yref": "paper",
-                "x": 0.5,
-                "y": 0.148,
-                "xanchor": "center",
-                "yanchor": "top",
-                "showarrow": False,
-                "font": {"size": 15, "family": "Arial"},
-            }
-        )
-    base_y = 0.118 if values_b is None else 0.108
-    for i, line in enumerate(footnotes or []):
-        annotations.append(
-            {
-                "text": line,
-                "xref": "paper",
-                "yref": "paper",
-                "x": 0.03,
-                "y": base_y - i * 0.026,
-                "xanchor": "left",
-                "yanchor": "top",
-                "showarrow": False,
-                "font": {"color": "#374151", "size": 13, "family": "Arial"},
-            }
-        )
-    annotations.append(
-        {
-            "text": "<b>@Dalaprospect</b>",
-            "xref": "paper",
-            "yref": "paper",
-            "x": 0.97,
-            "y": 0.012,
-            "xanchor": "right",
-            "yanchor": "bottom",
-            "showarrow": False,
-            "font": {"color": NAVY, "size": 14, "family": "Arial"},
-        }
-    )
-    if club_logo_uri and values_b is None:
-        images.append(
-            {
-                "source": club_logo_uri,
-                "xref": "paper",
-                "yref": "paper",
-                "x": 0.03,
-                "y": 0.97,
-                "sizex": 0.13,
-                "sizey": 0.13,
-                "xanchor": "left",
-                "yanchor": "top",
-                "sizing": "contain",
-                "layer": "above",
-            }
-        )
-    brand = get_logo_data_uri()
-    if brand:
-        images.append(
-            {
-                "source": brand,
-                "xref": "paper",
-                "yref": "paper",
-                "x": 0.97,
-                "y": 0.048,
-                "sizex": 0.085,
-                "sizey": 0.085,
-                "xanchor": "right",
-                "yanchor": "bottom",
-                "sizing": "contain",
-                "layer": "above",
-            }
-        )
-    fig.update_layout(
-        height=1500,
-        width=1200,
-        margin={"l": 120, "r": 120, "t": 155, "b": 170},
-        paper_bgcolor=WHITE,
-        plot_bgcolor=WHITE,
-        showlegend=False,
-        images=images,
-        annotations=annotations,
-        polar={
-            "domain": {"x": [0.15, 0.85], "y": [0.19, 0.80]},
-            "bgcolor": BG,
-            "radialaxis": {
-                "visible": True,
-                "range": [0, 122],
-                "tickvals": [0, 20, 40, 60, 80, 100],
-                "gridcolor": GRID,
-                "linecolor": AXIS,
-                "tickfont": {"color": AXIS, "size": 13},
-            },
-            "angularaxis": {
-                "gridcolor": GRID,
-                "linecolor": AXIS,
-                "tickfont": {"color": NAVY, "size": 13, "family": "Arial"},
-                "rotation": 90,
-                "direction": "clockwise",
-            },
-        },
-    )
-    return fig
+    y0 = 0.12
+    for i, line in enumerate((footnotes or [])[:4]):
+        fig.text(0.06, y0 - i * 0.022, line, ha="left", va="top", fontsize=8, color="#374151")
+    fig.text(0.94, 0.03, "@Dalaprospect", ha="right", va="bottom", fontsize=10, fontweight="bold", color=NAVY)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=140, facecolor="white", bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
 
 
 def render_radar(fig_kwargs, fname_base):
-    fig_web = build_radar_figure(**fig_kwargs, mode="web")
-    st.plotly_chart(fig_web, use_container_width=True)
-    fig_export = build_radar_figure(**fig_kwargs, mode="export")
-    try:
-        png = fig_export.to_image(format="png", width=1200, height=1500, scale=2)
-        st.download_button(
-            T["download"],
-            data=png,
-            file_name=f"{fname_base}_superliga_radar.png",
-            mime="image/png",
-        )
-    except Exception:
-        pass
+    png = build_radar_png(
+        labels=fig_kwargs["labels"],
+        values_a=fig_kwargs["values_a"],
+        title_lines=fig_kwargs.get("title_lines") or [],
+        footnotes=fig_kwargs.get("footnotes") or [],
+        display_texts=fig_kwargs.get("display_texts"),
+        values_b=fig_kwargs.get("values_b"),
+        name_a=fig_kwargs.get("name_a"),
+        name_b=fig_kwargs.get("name_b"),
+        marker_colors_a=fig_kwargs.get("marker_colors_a"),
+    )
+    st.image(png, use_container_width=True)
+    st.download_button(
+        T["download"],
+        data=png,
+        file_name=f"{fname_base}_superliga_radar.png",
+        mime="image/png",
+    )
 
 
 def percentile_rank(values, target, higher_is_better=True):
@@ -874,7 +679,10 @@ def player_key(g):
 
 
 def pct_vector(g, mdefs):
-    return [50.0 if g.get("pct", {}).get(m["key"]) is None else float(g["pct"][m["key"]]) for m in mdefs]
+    return [
+        50.0 if g.get("pct", {}).get(m["key"]) is None else float(g["pct"][m["key"]])
+        for m in mdefs
+    ]
 
 
 def similarity_score(vec_a, vec_b):
@@ -924,7 +732,9 @@ def build_position_pools(aggs, team_id_to_name, min_min, players_meta=None, as_o
             higher = m["kind"] != "lower_better_per90"
             for g in group:
                 v = g["metrics"].get(m["key"])
-                g.setdefault("pct", {})[m["key"]] = None if v is None else percentile_rank(vals, v, higher)
+                g.setdefault("pct", {})[m["key"]] = (
+                    None if v is None else percentile_rank(vals, v, higher)
+                )
     return by_pos
 
 
@@ -997,8 +807,7 @@ teams_res = requests.get(
     timeout=30,
 )
 teams = teams_res.json().get("data", []) if teams_res.status_code == 200 else []
-team_id_to_name = {}
-team_id_to_logo = {}
+team_id_to_name, team_id_to_logo = {}, {}
 for t in teams:
     tid = t.get("id")
     if tid is None:
@@ -1036,9 +845,8 @@ def _paginate_fixtures_window(start, end, filter_str=None):
 
 
 def _fetch_between_chunked(start_s, end_s, filter_str=None):
-    chunks = _date_chunks(start_s, end_s, MAX_BETWEEN_DAYS)
     all_fx, seen_ids, total_errors, last_status = [], set(), 0, None
-    for w_start, w_end in chunks:
+    for w_start, w_end in _date_chunks(start_s, end_s, MAX_BETWEEN_DAYS):
         fx, err, status, _ = _paginate_fixtures_window(w_start, w_end, filter_str)
         last_status = status
         total_errors += err
@@ -1056,14 +864,15 @@ def fetch_season_fixtures_list(sid, season_meta_row):
     start = (season_meta_row.get("starting_at") or "")[:10] or "2024-07-01"
     end = (season_meta_row.get("ending_at") or "")[:10] or "2027-06-30"
     today = date.today().isoformat()
-    wide_start = start
-    wide_end = min(end, today) if end else today
+    wide_start, wide_end = start, min(end, today) if end else today
     if wide_end < wide_start:
         wide_end = wide_start
     fx_a, err_a, _, _, _ = _fetch_between_chunked(wide_start, wide_end, f"fixtureSeasons:{sid}")
     all_fx, errors = fx_a, err_a
     if len(all_fx) == 0:
-        fx_b, err_b, _, _, _ = _fetch_between_chunked(wide_start, wide_end, f"fixtureLeagues:{LEAGUE_ID}")
+        fx_b, err_b, _, _, _ = _fetch_between_chunked(
+            wide_start, wide_end, f"fixtureLeagues:{LEAGUE_ID}"
+        )
         filtered = []
         for fx in fx_b:
             fx_sid = fx.get("season_id") or (fx.get("season") or {}).get("id")
@@ -1181,14 +990,12 @@ def restore_aggs_from_file(sid):
         pid, tid = p.get("player_id"), p.get("team_id")
         if not pid or not tid:
             continue
-        raw_in = p.get("raw") or {}
         raw_out = {}
-        if isinstance(raw_in, dict):
-            for k, v in raw_in.items():
-                try:
-                    raw_out[int(k)] = float(v) if v is not None else 0.0
-                except (TypeError, ValueError):
-                    continue
+        for k, v in (p.get("raw") or {}).items():
+            try:
+                raw_out[int(k)] = float(v) if v is not None else 0.0
+            except (TypeError, ValueError):
+                continue
         restored[f"{sid}_{pid}_{tid}"] = {
             "season_id": sid,
             "player_id": pid,
@@ -1276,14 +1083,18 @@ def incremental_update(sid, season_meta_row, force_all=False):
     if not need_rebuild and agg_path.exists():
         aggs, meta = restore_aggs_from_file(sid)
         if aggs is not None:
-            return aggs, {
-                "finished_fixtures": finished_count,
-                "new_fetched": 0,
-                "players": len(aggs),
-                "updated_at": (meta or {}).get("updated_at") or now,
-                "mode": "incremental_skip_rebuild",
-                "season_id": sid,
-            }, errors
+            return (
+                aggs,
+                {
+                    "finished_fixtures": finished_count,
+                    "new_fetched": 0,
+                    "players": len(aggs),
+                    "updated_at": (meta or {}).get("updated_at") or now,
+                    "mode": "incremental_skip_rebuild",
+                    "season_id": sid,
+                },
+                errors,
+            )
     aggs = aggregate_player_team(loaded, sid)
     status = {
         "finished_fixtures": finished_count,
@@ -1389,19 +1200,12 @@ with tab_radar:
             st.markdown(T["pct_body"])
             st.caption(T["band_legend"])
         st.markdown(f"##### {T['radar']}")
-        radar_labels = [m["label"] for m in mdefs]
-        values_a = [sel.get("pct", {}).get(m["key"]) or 0 for m in mdefs]
-        display_a = [
-            fmt_radar_label(sel["metrics"].get(m["key"]), is_ratio=(m["kind"] == "ratio"))
-            for m in mdefs
-        ]
-        marker_colors_a = [percentile_band(sel.get("pct", {}).get(m["key"]))[1] for m in mdefs]
         sample_line = f"{pos}, ≥{int(min_min_r)}′ (n={n_pos})"
         if is_small:
             sample_line += " · ⚠ small" if is_en else " · ⚠ 母集団小"
         fig_kwargs = {
-            "labels": radar_labels,
-            "values_a": values_a,
+            "labels": [m["label"] for m in mdefs],
+            "values_a": [sel.get("pct", {}).get(m["key"]) or 0 for m in mdefs],
             "title_lines": [
                 sel["Player"],
                 f"{sel['Team']} | {pos} | {age_str} | {sel['Minutes']} min",
@@ -1413,10 +1217,12 @@ with tab_radar:
                 "Per90 = Minutes Played · Fixture aggregate · Sportmonks",
                 f"Superliga {season_name} · Superliga Radar · @Dalaprospect",
             ],
-            "display_texts": display_a,
+            "display_texts": [
+                fmt_radar_label(sel["metrics"].get(m["key"]), is_ratio=(m["kind"] == "ratio"))
+                for m in mdefs
+            ],
             "name_a": sel["Player"],
-            "marker_colors_a": marker_colors_a,
-            "club_logo_uri": club_uri,
+            "marker_colors_a": [percentile_band(sel.get("pct", {}).get(m["key"]))[1] for m in mdefs],
         }
         st.caption(T["band_legend"])
         render_radar(fig_kwargs, sel["Player"].replace(" ", "_"))
@@ -1441,7 +1247,11 @@ with tab_radar:
         df = pd.DataFrame(rows)
         pct_cols = [c for c in df.columns if "%ile" in c]
         if pct_cols:
-            st.dataframe(df.style.map(style_percentile_col, subset=pct_cols), use_container_width=True, hide_index=True)
+            st.dataframe(
+                df.style.map(style_percentile_col, subset=pct_cols),
+                use_container_width=True,
+                hide_index=True,
+            )
         else:
             st.dataframe(df, use_container_width=True, hide_index=True)
 
@@ -1508,7 +1318,6 @@ with tab_compare:
                     "name_a": sel_a["Player"],
                     "name_b": sel_b["Player"],
                     "marker_colors_a": None,
-                    "club_logo_uri": None,
                 }
                 st.markdown(f"##### {T['radar']}")
                 render_radar(
@@ -1530,7 +1339,11 @@ with tab_compare:
                     )
                 df = pd.DataFrame(rows)
                 pct_cols = [c for c in df.columns if "%ile" in c]
-                st.dataframe(df.style.map(style_percentile_col, subset=pct_cols), use_container_width=True, hide_index=True)
+                st.dataframe(
+                    df.style.map(style_percentile_col, subset=pct_cols),
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
 with tab_discover:
     st.caption(T["discover_hint"])
@@ -1561,7 +1374,11 @@ with tab_discover:
         with cols[2]:
             if use:
                 thr = st.selectbox(
-                    T["min_pct"], PCT_THRESHOLDS, index=2, key=f"disc_thr_{m['key']}", label_visibility="collapsed"
+                    T["min_pct"],
+                    PCT_THRESHOLDS,
+                    index=2,
+                    key=f"disc_thr_{m['key']}",
+                    label_visibility="collapsed",
                 )
                 active_filters.append((m, thr))
             else:
@@ -1602,7 +1419,11 @@ with tab_discover:
             pct_cols = [c for c in df.columns if "%ile" in c]
             st.caption(f"{len(results)} players")
             if pct_cols:
-                st.dataframe(df.style.map(style_percentile_col, subset=pct_cols), use_container_width=True, hide_index=True)
+                st.dataframe(
+                    df.style.map(style_percentile_col, subset=pct_cols),
+                    use_container_width=True,
+                    hide_index=True,
+                )
             else:
                 st.dataframe(df, use_container_width=True, hide_index=True)
 
@@ -1643,14 +1464,16 @@ with tab_similar:
         if not scored:
             st.warning(T["no_similar"])
         else:
-            rows = [{
-                "#": "★",
-                "Player": ref["Player"],
-                "Team": ref["Team"],
-                T["age"]: fmt_age(ref.get("Age")),
-                "Minutes": ref["Minutes"],
-                T["similarity"]: fmt_num(100, "pct"),
-            }]
+            rows = [
+                {
+                    "#": "★",
+                    "Player": ref["Player"],
+                    "Team": ref["Team"],
+                    T["age"]: fmt_age(ref.get("Age")),
+                    "Minutes": ref["Minutes"],
+                    T["similarity"]: fmt_num(100, "pct"),
+                }
+            ]
             for m in mdefs[:4]:
                 rows[0][f"{m['label']} %ile"] = fmt_num(ref.get("pct", {}).get(m["key"]), "pct")
             for rank, (sim, g) in enumerate(scored, start=1):
@@ -1672,7 +1495,11 @@ with tab_similar:
                 + (" · ★ = reference" if is_en else " · ★ = 基準選手")
             )
             if pct_cols:
-                st.dataframe(df.style.map(style_percentile_col, subset=pct_cols), use_container_width=True, hide_index=True)
+                st.dataframe(
+                    df.style.map(style_percentile_col, subset=pct_cols),
+                    use_container_width=True,
+                    hide_index=True,
+                )
             else:
                 st.dataframe(df, use_container_width=True, hide_index=True)
 
@@ -1687,7 +1514,9 @@ with st.expander(T["admin_title"], expanded=False):
     force_all = st.checkbox(T["force"], value=False)
     if st.button(T["update"], type="primary"):
         with st.spinner(T["updating"]):
-            aggs2, status2, errors2 = incremental_update(season_id, season_info, force_all=force_all)
+            aggs2, status2, errors2 = incremental_update(
+                season_id, season_info, force_all=force_all
+            )
             st.session_state.fx_aggs = aggs2
             st.session_state.fx_status = status2
             st.session_state.fx_errors = errors2
