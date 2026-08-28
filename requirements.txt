@@ -1,6 +1,5 @@
 streamlit
 requests
 pandas
-plotly
-matplotlib
-kaleido>=1.0.0
+plotly==5.24.1
+kaleido==0.2.1
