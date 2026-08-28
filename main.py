@@ -14,25 +14,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.io as pio
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-st.set_page_config(
-    page_title="Superliga Radar",
-    page_icon="⚽",
-    layout="centered",
-)
+st.set_page_config(page_title="Superliga Radar", page_icon="⚽", layout="centered")
 
 components.html(
     """
     <script>
     (function () {
-      try {
-        if (window.parent && window.parent.history) {
-          window.parent.history.scrollRestoration = 'manual';
-        }
-      } catch (e) {}
+      try { if (window.parent && window.parent.history) window.parent.history.scrollRestoration = 'manual'; } catch (e) {}
       function toTop() {
         try {
           const doc = window.parent.document;
@@ -41,9 +34,7 @@ components.html(
           if (window.parent.scrollTo) window.parent.scrollTo(0, 0);
         } catch (e) {}
       }
-      toTop();
-      setTimeout(toTop, 50);
-      setTimeout(toTop, 200);
+      toTop(); setTimeout(toTop, 50); setTimeout(toTop, 200);
     })();
     </script>
     """,
@@ -68,11 +59,7 @@ MAX_BETWEEN_DAYS = 90
 MAX_SEASONS = 3
 SMALL_SAMPLE_N = 15
 PCT_THRESHOLDS = [50, 60, 70, 80, 90]
-
-BAND_ELITE = "#0B1F3A"
-BAND_STRONG = "#2563EB"
-BAND_AVG = "#64748B"
-BAND_BELOW = "#CBD5E1"
+BAND_ELITE, BAND_STRONG, BAND_AVG, BAND_BELOW = "#0B1F3A", "#2563EB", "#64748B", "#CBD5E1"
 
 
 def percentile_band(p):
@@ -134,9 +121,7 @@ def calc_age(dob_str, as_of):
         age = as_of.year - dob.year
         if (as_of.month, as_of.day) < (dob.month, dob.day):
             age -= 1
-        if age < 0 or age > 60:
-            return None
-        return int(age)
+        return int(age) if 0 <= age <= 60 else None
     except Exception:
         return None
 
@@ -195,17 +180,11 @@ POSITION_METRICS = {
 
 _, lang_col = st.columns([4, 1])
 with lang_col:
-    language = st.selectbox(
-        "Language", ["日本語", "English"], index=0, label_visibility="collapsed"
-    )
+    language = st.selectbox("Language", ["日本語", "English"], index=0, label_visibility="collapsed")
 is_en = language == "English"
 
 T = {
-    "tagline": (
-        "Explore Danish Superliga players with position-specific percentile radars."
-        if is_en
-        else "デンマーク・スーペルリーガの選手を、ポジション別Percentileレーダーで探索。"
-    ),
+    "tagline": "Explore Danish Superliga players with position-specific percentile radars." if is_en else "デンマーク・スーペルリーガの選手を、ポジション別Percentileレーダーで探索。",
     "season": "Season" if is_en else "シーズン",
     "min_minutes": "Minimum minutes" if is_en else "最低出場時間",
     "team": "Team" if is_en else "チーム",
@@ -220,50 +199,28 @@ T = {
     "stats": "Statistics" if is_en else "スタッツ詳細",
     "download": "Download PNG" if is_en else "PNGをダウンロード",
     "update": "Update data" if is_en else "データ更新",
-    "force": "Force re-fetch all fixtures (rarely needed)"
-    if is_en
-    else "全Fixtureを強制再取得（通常は不要）",
+    "force": "Force re-fetch all fixtures (rarely needed)" if is_en else "全Fixtureを強制再取得（通常は不要）",
     "updating": "Updating..." if is_en else "更新中...",
     "no_data": "No data yet." if is_en else "データがありません。",
     "no_fixtures": "No finished fixtures found." if is_en else "終了試合が取得できませんでした。",
     "no_players": "No players match the filters." if is_en else "条件に合う選手がいません。",
-    "no_compare": "No other players in this position."
-    if is_en
-    else "同ポジションに比較できる選手がいません。",
+    "no_compare": "No other players in this position." if is_en else "同ポジションに比較できる選手がいません。",
     "pct_title": "What is Percentile?" if is_en else "Percentileとは？",
     "pct_body": (
-        "Same-position ranking 0–100 under the minute filter.\n\n"
-        "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30"
-        if is_en
-        else "同ポジション・出場時間条件での順位（0–100）。\n\n"
-        "帯: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満"
+        "Same-position ranking 0–100 under the minute filter.\n\nBands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30"
+        if is_en else
+        "同ポジション・出場時間条件での順位（0–100）。\n\n帯: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満"
     ),
-    "early_note": (
-        "Early season: overall sample is still building — treat percentiles as indicative."
-        if is_en
-        else "シーズン序盤は全体の母集団がまだ小さいため、Percentileは参考値として見てください。"
-    ),
-    "small_sample": (
-        "⚠ Small sample (n={n}) — percentile ranks can swing a lot."
-        if is_en
-        else "⚠ 母集団が小さいです（n={n}）。Percentileは参考値として見てください。"
-    ),
-    "band_legend": (
-        "Vertex (single): Elite 90+ · Strong 70–89 · Average 30–69 · Below <30"
-        if is_en
-        else "頂点色（単体）: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満"
-    ),
+    "early_note": "Early season: overall sample is still building — treat percentiles as indicative." if is_en else "シーズン序盤は全体の母集団がまだ小さいため、Percentileは参考値として見てください。",
+    "small_sample": "⚠ Small sample (n={n}) — percentile ranks can swing a lot." if is_en else "⚠ 母集団が小さいです（n={n}）。Percentileは参考値として見てください。",
+    "band_legend": "Vertex (single): Elite 90+ · Strong 70–89 · Average 30–69 · Below <30" if is_en else "頂点色（単体）: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満",
     "method_title": "Data & methodology" if is_en else "データと計算方法",
     "admin_title": "Data maintenance" if is_en else "データメンテナンス",
     "last_updated": "Last updated" if is_en else "最終更新",
     "connected": "Connected" if is_en else "接続済み",
     "apps": "Apps" if is_en else "出場数",
     "season_loading": "Loading..." if is_en else "読み込み中...",
-    "discover_hint": (
-        "Enable metrics and set a minimum percentile. Same pool as Radar."
-        if is_en
-        else "指標を有効化し、最低Percentileを設定。母集団はRadarと同じです。"
-    ),
+    "discover_hint": "Enable metrics and set a minimum percentile. Same pool as Radar." if is_en else "指標を有効化し、最低Percentileを設定。母集団はRadarと同じです。",
     "metric_filters": "Metric filters" if is_en else "指標フィルタ",
     "results": "Results" if is_en else "検索結果",
     "no_results": "No players match the filters." if is_en else "条件に合う選手がいません。",
@@ -272,11 +229,7 @@ T = {
     "tab_compare": "⚔️ Compare" if is_en else "⚔️ 選手比較",
     "tab_discover": "🔍 Discover" if is_en else "🔍 探索",
     "tab_similar": "👥 Similar" if is_en else "👥 類似選手",
-    "similar_hint": (
-        "Find same-position players with a similar percentile profile (radar shape)."
-        if is_en
-        else "同ポジションで Percentile の形が近い選手を探します。"
-    ),
+    "similar_hint": "Find same-position players with a similar percentile profile (radar shape)." if is_en else "同ポジションで Percentile の形が近い選手を探します。",
     "ref_player": "Reference player" if is_en else "基準選手",
     "top_n": "Show top" if is_en else "表示件数",
     "similarity": "Similarity" if is_en else "類似度",
@@ -286,12 +239,10 @@ T = {
 }
 
 st.markdown(
-    f"""
-    <div style="background:{NAVY};padding:18px 16px 14px;border-radius:14px;margin-bottom:14px;">
+    f"""<div style="background:{NAVY};padding:18px 16px 14px;border-radius:14px;margin-bottom:14px;">
       <div style="color:white;font-size:26px;font-weight:750;">Superliga Radar</div>
       <div style="color:#C9D4E3;font-size:13px;margin-top:6px;">{T["tagline"]}</div>
-    </div>
-    """,
+    </div>""",
     unsafe_allow_html=True,
 )
 
@@ -368,15 +319,8 @@ def _save_json(path, obj):
 def _is_finished_fixture(fx):
     state = fx.get("state") or {}
     state_id = fx.get("state_id") or state.get("id")
-    name = (
-        state.get("short_name")
-        or state.get("name")
-        or state.get("developer_name")
-        or ""
-    ).upper()
-    if state_id in (5, 7, 8):
-        return True
-    if name in ("FT", "FULL TIME", "FINISHED", "AET", "FT_PEN"):
+    name = (state.get("short_name") or state.get("name") or state.get("developer_name") or "").upper()
+    if state_id in (5, 7, 8) or name in ("FT", "FULL TIME", "FINISHED", "AET", "FT_PEN"):
         return True
     return bool(fx.get("result_info") or fx.get("scores"))
 
@@ -397,14 +341,7 @@ def fetch_image_data_uri(url: str):
         if r.status_code != 200 or not r.content:
             return None
         ctype = (r.headers.get("Content-Type") or "image/png").split(";")[0].strip()
-        if "png" in ctype:
-            mime = "image/png"
-        elif "jpeg" in ctype or "jpg" in ctype:
-            mime = "image/jpeg"
-        elif "svg" in ctype:
-            mime = "image/svg+xml"
-        else:
-            mime = "image/png"
+        mime = "image/jpeg" if ("jpeg" in ctype or "jpg" in ctype) else ("image/svg+xml" if "svg" in ctype else "image/png")
         return f"data:{mime};base64,{base64.b64encode(r.content).decode('ascii')}"
     except Exception:
         return None
@@ -427,8 +364,7 @@ def as_of_date_from_status(status_obj):
     iso = (status_obj or {}).get("updated_at")
     if iso:
         try:
-            s = str(iso).replace("Z", "+00:00")
-            return datetime.fromisoformat(s).date()
+            return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).date()
         except Exception:
             pass
     return date.today()
@@ -450,12 +386,7 @@ def save_players_meta(meta):
 
 def fetch_player_dob(player_id):
     try:
-        res = requests.get(
-            f"{base_url}/players/{player_id}",
-            headers=headers,
-            params=params,
-            timeout=20,
-        )
+        res = requests.get(f"{base_url}/players/{player_id}", headers=headers, params=params, timeout=20)
         if res.status_code != 200:
             return None
         data = (res.json() or {}).get("data") or {}
@@ -487,10 +418,7 @@ def ensure_player_ages(aggs, show_spinner=True):
     ctx = st.spinner(T["ages_loading"]) if show_spinner else nullcontext()
     with ctx:
         for i, pid in enumerate(sorted(needed)):
-            meta[str(pid)] = {
-                "dob": fetch_player_dob(pid),
-                "fetched_at": datetime.now(timezone.utc).isoformat(),
-            }
+            meta[str(pid)] = {"dob": fetch_player_dob(pid), "fetched_at": datetime.now(timezone.utc).isoformat()}
             if (i + 1) % 20 == 0:
                 save_players_meta(meta)
             time.sleep(0.05)
@@ -503,8 +431,7 @@ def _parse_ymd(s):
 
 
 def _date_chunks(start_s, end_s, max_days=MAX_BETWEEN_DAYS):
-    start = _parse_ymd(start_s)
-    end = _parse_ymd(end_s)
+    start, end = _parse_ymd(start_s), _parse_ymd(end_s)
     if end < start:
         end = start
     chunks, cur = [], start
@@ -515,94 +442,133 @@ def _date_chunks(start_s, end_s, max_days=MAX_BETWEEN_DAYS):
     return chunks
 
 
-def build_radar_png(
-    labels,
-    values_a,
-    title_lines,
-    footnotes,
-    display_texts=None,
-    values_b=None,
-    name_a=None,
-    name_b=None,
-    marker_colors_a=None,
+def build_radar_figure(
+    labels, values_a, title_lines, footnotes,
+    display_texts=None, values_b=None, name_a=None, name_b=None,
+    marker_colors_a=None, club_logo_uri=None,
 ):
-    """MatplotlibでPNGを生成。長押し保存用。"""
-    n = max(len(labels), 1)
-    angles = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist()
-    angles += angles[:1]
+    fig = go.Figure()
+    n = len(labels)
+    theta = labels + [labels[0]]
+    m_colors = list(marker_colors_a) + [marker_colors_a[0]] if (marker_colors_a and values_b is None) else NAVY
+    fig.add_trace(go.Scatterpolar(
+        r=values_a + [values_a[0]], theta=theta, fill="toself", fillcolor=NAVY_SOFT,
+        line={"color": NAVY, "width": 3.4},
+        marker={"color": m_colors, "size": 16, "line": {"color": NAVY, "width": 1.8}},
+        mode="lines+markers", name=name_a or "A",
+        hovertemplate="%{theta}: %{r:.0f}<extra>" + (name_a or "A") + "</extra>",
+    ))
+    if values_b is not None:
+        fig.add_trace(go.Scatterpolar(
+            r=values_b + [values_b[0]], theta=theta, fill="toself", fillcolor=ACCENT_SOFT,
+            line={"color": ACCENT, "width": 3.4},
+            marker={"color": ACCENT, "size": 16, "line": {"color": WHITE, "width": 1.2}},
+            mode="lines+markers", name=name_b or "B",
+            hovertemplate="%{theta}: %{r:.0f}<extra>" + (name_b or "B") + "</extra>",
+        ))
+    fig.add_trace(go.Scatterpolar(
+        r=[100.0] * (n + 1), theta=theta, mode="lines",
+        line={"color": RING_100, "width": 2.6}, hoverinfo="skip", showlegend=False,
+    ))
+    if values_b is None and display_texts is not None:
+        fig.add_trace(go.Scatterpolar(
+            r=[108] * (n + 1), theta=theta, mode="text",
+            text=list(display_texts) + [display_texts[0]],
+            textfont={"size": 18, "color": NAVY, "family": "Arial Black, Arial, sans-serif"},
+            hoverinfo="skip", showlegend=False,
+        ))
+    annotations = []
+    title_sizes = [32, 18, 14] if values_b is not None else [44, 20, 16]
+    title_ys = [0.975, 0.935, 0.905] if values_b is not None else [0.985, 0.938, 0.905]
+    for i, line in enumerate(title_lines):
+        annotations.append({
+            "text": f"<b>{line}</b>" if i == 0 else line, "xref": "paper", "yref": "paper",
+            "x": 0.5, "y": title_ys[i] if i < len(title_ys) else 0.88,
+            "xanchor": "center", "yanchor": "top", "showarrow": False,
+            "font": {"color": NAVY, "size": title_sizes[i] if i < len(title_sizes) else 15, "family": "Arial"},
+        })
+    if values_b is not None:
+        annotations.append({
+            "text": f"<span style='color:{NAVY}'><b>■ {name_a}</b></span>　　<span style='color:{ACCENT}'><b>■ {name_b}</b></span>",
+            "xref": "paper", "yref": "paper", "x": 0.5, "y": 0.148,
+            "xanchor": "center", "yanchor": "top", "showarrow": False, "font": {"size": 15, "family": "Arial"},
+        })
+    base_y = 0.118 if values_b is None else 0.108
+    for i, line in enumerate(footnotes or []):
+        annotations.append({
+            "text": line, "xref": "paper", "yref": "paper", "x": 0.03, "y": base_y - i * 0.026,
+            "xanchor": "left", "yanchor": "top", "showarrow": False,
+            "font": {"color": "#374151", "size": 13, "family": "Arial"},
+        })
+    annotations.append({
+        "text": "<b>@Dalaprospect</b>", "xref": "paper", "yref": "paper",
+        "x": 0.97, "y": 0.012, "xanchor": "right", "yanchor": "bottom", "showarrow": False,
+        "font": {"color": NAVY, "size": 14, "family": "Arial"},
+    })
+    images = []
+    if club_logo_uri and values_b is None:
+        images.append({
+            "source": club_logo_uri, "xref": "paper", "yref": "paper",
+            "x": 0.03, "y": 0.97, "sizex": 0.13, "sizey": 0.13,
+            "xanchor": "left", "yanchor": "top", "sizing": "contain", "layer": "above",
+        })
+    brand = get_logo_data_uri()
+    if brand:
+        images.append({
+            "source": brand, "xref": "paper", "yref": "paper",
+            "x": 0.97, "y": 0.048, "sizex": 0.085, "sizey": 0.085,
+            "xanchor": "right", "yanchor": "bottom", "sizing": "contain", "layer": "above",
+        })
+    fig.update_layout(
+        height=1500, width=1200,
+        margin={"l": 120, "r": 120, "t": 155, "b": 170},
+        paper_bgcolor=WHITE, plot_bgcolor=WHITE, showlegend=False,
+        images=images, annotations=annotations,
+        polar={
+            "domain": {"x": [0.15, 0.85], "y": [0.19, 0.80]},
+            "bgcolor": BG,
+            "radialaxis": {
+                "visible": True, "range": [0, 122], "tickvals": [0, 20, 40, 60, 80, 100],
+                "gridcolor": GRID, "linecolor": AXIS, "tickfont": {"color": AXIS, "size": 13},
+            },
+            "angularaxis": {
+                "gridcolor": GRID, "linecolor": AXIS,
+                "tickfont": {"color": NAVY, "size": 13, "family": "Arial"},
+                "rotation": 90, "direction": "clockwise",
+            },
+        },
+    )
+    return fig
 
+
+def _mpl_fallback_png(fig_kwargs):
+    labels = fig_kwargs["labels"]
+    values_a = fig_kwargs["values_a"]
+    n = max(len(labels), 1)
+    angles = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist() + [0]
     def closed(vals):
         vals = [float(v or 0) for v in vals]
         return vals + vals[:1]
-
-    fig = plt.figure(figsize=(9.0, 12.0), dpi=140, facecolor="white")
-    fig.text(
-        0.50,
-        0.965,
-        title_lines[0] if title_lines else "",
-        ha="center",
-        va="top",
-        fontsize=20,
-        fontweight="bold",
-        color=NAVY,
-    )
-    if len(title_lines) > 1:
-        fig.text(0.50, 0.932, title_lines[1], ha="center", va="top", fontsize=12, color=NAVY)
-    if len(title_lines) > 2:
-        fig.text(0.50, 0.908, title_lines[2], ha="center", va="top", fontsize=10, color="#64748B")
-
+    fig = plt.figure(figsize=(9, 12), dpi=140, facecolor="white")
+    lines = fig_kwargs.get("title_lines") or []
+    fig.text(0.5, 0.965, lines[0] if lines else "", ha="center", va="top", fontsize=20, fontweight="bold", color=NAVY)
+    if len(lines) > 1:
+        fig.text(0.5, 0.932, lines[1], ha="center", va="top", fontsize=12, color=NAVY)
+    if len(lines) > 2:
+        fig.text(0.5, 0.908, lines[2], ha="center", va="top", fontsize=10, color="#64748B")
     ax = fig.add_axes([0.10, 0.18, 0.80, 0.68], polar=True)
-    ax.set_facecolor("#EEF2F7")
+    ax.set_facecolor(BG)
     ax.set_theta_offset(np.pi / 2)
     ax.set_theta_direction(-1)
     ax.set_ylim(0, 122)
     ax.set_yticks([20, 40, 60, 80, 100])
-    ax.set_yticklabels(["20", "40", "60", "80", "100"], color=AXIS, fontsize=8)
     ax.set_xticks(angles[:-1])
     ax.set_xticklabels(labels, color=NAVY, fontsize=9)
-    ax.spines["polar"].set_color(AXIS)
-    ax.grid(color=GRID, linewidth=0.8)
-    ax.plot(angles, [100] * (n + 1), color=RING_100, linewidth=1.6)
-
     r_a = closed(values_a)
-    ax.plot(angles, r_a, color=NAVY, linewidth=2.2)
+    ax.plot(angles, r_a, color=NAVY, linewidth=2.4)
     ax.fill(angles, r_a, color=NAVY, alpha=0.28)
-    point_colors = marker_colors_a if (marker_colors_a and values_b is None) else [NAVY] * n
-    ax.scatter(angles[:-1], r_a[:-1], c=point_colors, s=36, zorder=5, edgecolors=NAVY, linewidths=0.8)
-
-    if values_b is not None:
-        r_b = closed(values_b)
-        ax.plot(angles, r_b, color=ACCENT, linewidth=2.2)
-        ax.fill(angles, r_b, color=ACCENT, alpha=0.22)
-        ax.scatter(angles[:-1], r_b[:-1], c=ACCENT, s=36, zorder=5, edgecolors="white", linewidths=0.8)
-        fig.text(
-            0.50,
-            0.155,
-            f"■ {name_a or 'A'}          ■ {name_b or 'B'}",
-            ha="center",
-            va="top",
-            fontsize=10,
-            color=NAVY,
-        )
-
-    if values_b is None and display_texts:
-        for ang, txt in zip(angles[:-1], display_texts):
-            ax.text(
-                ang,
-                112,
-                str(txt),
-                ha="center",
-                va="center",
-                fontsize=8,
-                color=NAVY,
-                fontweight="bold",
-            )
-
-    y0 = 0.12
-    for i, line in enumerate((footnotes or [])[:4]):
-        fig.text(0.06, y0 - i * 0.022, line, ha="left", va="top", fontsize=8, color="#374151")
-    fig.text(0.94, 0.03, "@Dalaprospect", ha="right", va="bottom", fontsize=10, fontweight="bold", color=NAVY)
-
+    cols = fig_kwargs.get("marker_colors_a") or [NAVY] * n
+    ax.scatter(angles[:-1], r_a[:-1], c=cols, s=70, zorder=5, edgecolors=NAVY)
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=140, facecolor="white", bbox_inches="tight")
     plt.close(fig)
@@ -611,24 +577,20 @@ def build_radar_png(
 
 
 def render_radar(fig_kwargs, fname_base):
-    png = build_radar_png(
-        labels=fig_kwargs["labels"],
-        values_a=fig_kwargs["values_a"],
-        title_lines=fig_kwargs.get("title_lines") or [],
-        footnotes=fig_kwargs.get("footnotes") or [],
-        display_texts=fig_kwargs.get("display_texts"),
-        values_b=fig_kwargs.get("values_b"),
-        name_a=fig_kwargs.get("name_a"),
-        name_b=fig_kwargs.get("name_b"),
-        marker_colors_a=fig_kwargs.get("marker_colors_a"),
-    )
+    fig = build_radar_figure(**{k: v for k, v in fig_kwargs.items() if k != "mode"})
+    png = None
+    try:
+        try:
+            pio.kaleido.scope.chromium_args = ("--headless", "--no-sandbox", "--single-process", "--disable-gpu")
+        except Exception:
+            pass
+        png = fig.to_image(format="png", width=1200, height=1500, scale=2)
+    except Exception:
+        png = None
+    if not png:
+        png = _mpl_fallback_png(fig_kwargs)
     st.image(png, use_container_width=True)
-    st.download_button(
-        T["download"],
-        data=png,
-        file_name=f"{fname_base}_superliga_radar.png",
-        mime="image/png",
-    )
+    st.download_button(T["download"], data=png, file_name=f"{fname_base}_superliga_radar.png", mime="image/png")
 
 
 def percentile_rank(values, target, higher_is_better=True):
@@ -648,12 +610,9 @@ def compute_metrics(raw, minutes, metric_defs):
     out = {}
     for m in metric_defs:
         if m["kind"] in ("per90", "lower_better_per90"):
-            out[m["key"]] = (
-                round(raw.get(m["tid"], 0.0) * 90.0 / minutes, 3) if minutes > 0 else None
-            )
+            out[m["key"]] = round(raw.get(m["tid"], 0.0) * 90.0 / minutes, 3) if minutes > 0 else None
         elif m["kind"] == "ratio":
-            den = raw.get(m["den"], 0.0)
-            num = raw.get(m["num"], 0.0)
+            den, num = raw.get(m["den"], 0.0), raw.get(m["num"], 0.0)
             out[m["key"]] = round(num / den * 100.0, 2) if den > 0 else None
     return out
 
@@ -679,10 +638,7 @@ def player_key(g):
 
 
 def pct_vector(g, mdefs):
-    return [
-        50.0 if g.get("pct", {}).get(m["key"]) is None else float(g["pct"][m["key"]])
-        for m in mdefs
-    ]
+    return [50.0 if g.get("pct", {}).get(m["key"]) is None else float(g["pct"][m["key"]]) for m in mdefs]
 
 
 def similarity_score(vec_a, vec_b):
@@ -690,9 +646,7 @@ def similarity_score(vec_a, vec_b):
         return 0.0
     dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(vec_a, vec_b)))
     max_dist = 100.0 * math.sqrt(len(vec_a))
-    if max_dist <= 0:
-        return 100.0
-    return round(max(0.0, 100.0 * (1.0 - dist / max_dist)), 1)
+    return 100.0 if max_dist <= 0 else round(max(0.0, 100.0 * (1.0 - dist / max_dist)), 1)
 
 
 def build_position_pools(aggs, team_id_to_name, min_min, players_meta=None, as_of=None):
@@ -706,35 +660,27 @@ def build_position_pools(aggs, team_id_to_name, min_min, players_meta=None, as_o
         pos = POSITION_MAP.get(a["position_id"])
         if pos not in by_pos:
             continue
-        metrics = compute_metrics(a["raw"], mins, POSITION_METRICS[pos])
-        team_name = team_id_to_name.get(a["team_id"]) or (
-            str(a["team_id"]) if a["team_id"] is not None else "Unknown"
-        )
         pid = a.get("player_id")
         dob = (players_meta.get(str(pid)) or {}).get("dob") if pid is not None else None
-        by_pos[pos].append(
-            {
-                "Player": a["player_name"] or f"id:{a['player_id']}",
-                "PlayerId": pid,
-                "Team": team_name,
-                "TeamId": a["team_id"],
-                "Pos": pos,
-                "Minutes": int(round(mins)),
-                "Apps": a["apps"],
-                "Age": calc_age(dob, as_of),
-                "metrics": metrics,
-                "raw": a["raw"],
-            }
-        )
+        by_pos[pos].append({
+            "Player": a["player_name"] or f"id:{a['player_id']}",
+            "PlayerId": pid,
+            "Team": team_id_to_name.get(a["team_id"]) or (str(a["team_id"]) if a["team_id"] is not None else "Unknown"),
+            "TeamId": a["team_id"],
+            "Pos": pos,
+            "Minutes": int(round(mins)),
+            "Apps": a["apps"],
+            "Age": calc_age(dob, as_of),
+            "metrics": compute_metrics(a["raw"], mins, POSITION_METRICS[pos]),
+            "raw": a["raw"],
+        })
     for pos, group in by_pos.items():
         for m in POSITION_METRICS[pos]:
             vals = [g["metrics"][m["key"]] for g in group if g["metrics"].get(m["key"]) is not None]
             higher = m["kind"] != "lower_better_per90"
             for g in group:
                 v = g["metrics"].get(m["key"])
-                g.setdefault("pct", {})[m["key"]] = (
-                    None if v is None else percentile_rank(vals, v, higher)
-                )
+                g.setdefault("pct", {})[m["key"]] = None if v is None else percentile_rank(vals, v, higher)
     return by_pos
 
 
@@ -742,49 +688,30 @@ def get_pools_cached(season_id, min_min, aggs, team_id_to_name, players_meta, as
     key = f"pools_{season_id}_{int(min_min)}_{as_of.isoformat()}"
     if st.session_state.get("_pools_key") != key or "pools_data" not in st.session_state:
         st.session_state["_pools_key"] = key
-        st.session_state["pools_data"] = build_position_pools(
-            aggs, team_id_to_name, min_min, players_meta, as_of
-        )
+        st.session_state["pools_data"] = build_position_pools(aggs, team_id_to_name, min_min, players_meta, as_of)
     return st.session_state["pools_data"]
 
 
-league_res = requests.get(
-    f"{base_url}/leagues/{LEAGUE_ID}",
-    headers=headers,
-    params={**params, "include": "currentSeason;seasons"},
-    timeout=30,
-)
+league_res = requests.get(f"{base_url}/leagues/{LEAGUE_ID}", headers=headers, params={**params, "include": "currentSeason;seasons"}, timeout=30)
 if league_res.status_code != 200:
     st.error(f"League error: {league_res.status_code}")
     st.stop()
-
 league = league_res.json().get("data", {})
 current_season = league.get("currentseason") or league.get("currentSeason") or {}
 season_records = [s for s in league.get("seasons", []) if s.get("id") and s.get("name")]
 if not season_records and current_season.get("id"):
     season_records = [current_season]
-season_records.sort(
-    key=lambda s: (s.get("id") == current_season.get("id"), s.get("starting_at") or ""),
-    reverse=True,
-)
+season_records.sort(key=lambda s: (s.get("id") == current_season.get("id"), s.get("starting_at") or ""), reverse=True)
 season_records = season_records[:MAX_SEASONS]
 season_options = {s["name"]: s["id"] for s in season_records}
 season_meta = {s["id"]: s for s in season_records}
 season_names = list(season_options)
 default_name = next((s["name"] for s in season_records if s["id"] == default_season_id), None)
 if default_name is None:
-    default_name = next(
-        (s["name"] for s in season_records if s["id"] == current_season.get("id")),
-        season_names[0] if season_names else "",
-    )
+    default_name = next((s["name"] for s in season_records if s["id"] == current_season.get("id")), season_names[0] if season_names else "")
 
 st.markdown(f"##### {T['season']}")
-selected_season_name = st.selectbox(
-    T["season"],
-    season_names,
-    index=season_names.index(default_name) if default_name in season_names else 0,
-    label_visibility="collapsed",
-)
+selected_season_name = st.selectbox(T["season"], season_names, index=season_names.index(default_name) if default_name in season_names else 0, label_visibility="collapsed")
 season_id = season_options[selected_season_name]
 season_name = selected_season_name
 season_info = season_meta.get(season_id, {})
@@ -800,12 +727,7 @@ if st.session_state.get("loaded_season_id") != season_id:
         if k.startswith(("player_", "disc_", "cmp_", "radar_", "sim_")):
             del st.session_state[k]
 
-teams_res = requests.get(
-    f"{base_url}/teams/seasons/{season_id}",
-    headers=headers,
-    params=params,
-    timeout=30,
-)
+teams_res = requests.get(f"{base_url}/teams/seasons/{season_id}", headers=headers, params=params, timeout=30)
 teams = teams_res.json().get("data", []) if teams_res.status_code == 200 else []
 team_id_to_name, team_id_to_logo = {}, {}
 for t in teams:
@@ -819,20 +741,14 @@ for t in teams:
 
 
 def _paginate_fixtures_window(start, end, filter_str=None):
-    all_fx, page, last_status = [], 1, None
+    all_fx, page = [], 1
     while True:
         req_params = {**params, "include": "state;participants;scores", "page": page}
         if filter_str:
             req_params["filters"] = filter_str
-        res = requests.get(
-            f"{base_url}/fixtures/between/{start}/{end}",
-            headers=headers,
-            params=req_params,
-            timeout=40,
-        )
-        last_status = res.status_code
+        res = requests.get(f"{base_url}/fixtures/between/{start}/{end}", headers=headers, params=req_params, timeout=40)
         if res.status_code != 200:
-            return all_fx, 1, last_status, None
+            return all_fx, 1, res.status_code, None
         body = res.json() or {}
         all_fx.extend(body.get("data") or [])
         if not (body.get("pagination") or {}).get("has_more"):
@@ -841,14 +757,13 @@ def _paginate_fixtures_window(start, end, filter_str=None):
         if page > 30:
             break
         time.sleep(0.05)
-    return all_fx, 0, last_status, None
+    return all_fx, 0, 200, None
 
 
 def _fetch_between_chunked(start_s, end_s, filter_str=None):
-    all_fx, seen_ids, total_errors, last_status = [], set(), 0, None
+    all_fx, seen_ids, total_errors = [], set(), 0
     for w_start, w_end in _date_chunks(start_s, end_s, MAX_BETWEEN_DAYS):
-        fx, err, status, _ = _paginate_fixtures_window(w_start, w_end, filter_str)
-        last_status = status
+        fx, err, _, _ = _paginate_fixtures_window(w_start, w_end, filter_str)
         total_errors += err
         for item in fx:
             fid = item.get("id")
@@ -857,7 +772,7 @@ def _fetch_between_chunked(start_s, end_s, filter_str=None):
             seen_ids.add(fid)
             all_fx.append(item)
         time.sleep(0.05)
-    return all_fx, total_errors, last_status, None, []
+    return all_fx, total_errors, None, None, []
 
 
 def fetch_season_fixtures_list(sid, season_meta_row):
@@ -870,34 +785,17 @@ def fetch_season_fixtures_list(sid, season_meta_row):
     fx_a, err_a, _, _, _ = _fetch_between_chunked(wide_start, wide_end, f"fixtureSeasons:{sid}")
     all_fx, errors = fx_a, err_a
     if len(all_fx) == 0:
-        fx_b, err_b, _, _, _ = _fetch_between_chunked(
-            wide_start, wide_end, f"fixtureLeagues:{LEAGUE_ID}"
-        )
-        filtered = []
-        for fx in fx_b:
-            fx_sid = fx.get("season_id") or (fx.get("season") or {}).get("id")
-            if fx_sid is None or int(fx_sid) == int(sid):
-                filtered.append(fx)
+        fx_b, err_b, _, _, _ = _fetch_between_chunked(wide_start, wide_end, f"fixtureLeagues:{LEAGUE_ID}")
+        filtered = [fx for fx in fx_b if (fx.get("season_id") or (fx.get("season") or {}).get("id")) in (None, sid) or int(fx.get("season_id") or sid) == int(sid)]
         all_fx = filtered if filtered else fx_b
         errors += err_b
     finished = [fx for fx in all_fx if _is_finished_fixture(fx)]
-    if len(finished) == 0 and len(all_fx) > 0:
-        finished = [
-            fx
-            for fx in all_fx
-            if fx.get("scores") or fx.get("result_info") or fx.get("state_id") in (5, 7, 8)
-        ]
+    if len(finished) == 0 and all_fx:
+        finished = [fx for fx in all_fx if fx.get("scores") or fx.get("result_info") or fx.get("state_id") in (5, 7, 8)]
     payload = {
-        "season_id": sid,
-        "total_fetched": len(all_fx),
-        "finished_count": len(finished),
-        "list_errors": errors,
+        "season_id": sid, "total_fetched": len(all_fx), "finished_count": len(finished), "list_errors": errors,
         "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "fixtures": [
-            {"id": fx.get("id"), "name": fx.get("name"), "starting_at": fx.get("starting_at")}
-            for fx in finished
-            if fx.get("id")
-        ],
+        "fixtures": [{"id": fx.get("id"), "name": fx.get("name"), "starting_at": fx.get("starting_at")} for fx in finished if fx.get("id")],
     }
     _save_json(_cache_dir(sid) / "fixtures_list.json", payload)
     return payload
@@ -909,12 +807,7 @@ def load_fixture_detail(sid, fixture_id, force_refresh=False):
         cached = _load_json(path)
         if cached is not None:
             return cached, "cache", None
-    res = requests.get(
-        f"{base_url}/fixtures/{fixture_id}",
-        headers=headers,
-        params={**params, "include": "lineups.details.type;participants"},
-        timeout=45,
-    )
+    res = requests.get(f"{base_url}/fixtures/{fixture_id}", headers=headers, params={**params, "include": "lineups.details.type;participants"}, timeout=45)
     if res.status_code != 200:
         return None, "error", f"HTTP {res.status_code}"
     data = (res.json() or {}).get("data")
@@ -936,16 +829,7 @@ def aggregate_player_team(fixture_payloads, sid):
             pname = (lu.get("player") or {}).get("name") or lu.get("player_name") or f"id:{pid}"
             pos_id = lu.get("position_id") or ((lu.get("player") or {}).get("position_id"))
             if key not in aggs:
-                aggs[key] = {
-                    "season_id": sid,
-                    "player_id": pid,
-                    "team_id": tid,
-                    "player_name": pname,
-                    "position_id": pos_id,
-                    "minutes": 0.0,
-                    "raw": {},
-                    "apps": 0,
-                }
+                aggs[key] = {"season_id": sid, "player_id": pid, "team_id": tid, "player_name": pname, "position_id": pos_id, "minutes": 0.0, "raw": {}, "apps": 0}
             else:
                 if pname and str(aggs[key]["player_name"]).startswith("id:"):
                     aggs[key]["player_name"] = pname
@@ -961,8 +845,7 @@ def aggregate_player_team(fixture_payloads, sid):
                     continue
                 if type_id == MINUTES_TYPE_ID:
                     aggs[key]["minutes"] += parsed
-                    if parsed > 0:
-                        played = True
+                    played = parsed > 0 or played
                 else:
                     aggs[key]["raw"][type_id] = aggs[key]["raw"].get(type_id, 0.0) + parsed
             if played:
@@ -997,48 +880,20 @@ def restore_aggs_from_file(sid):
             except (TypeError, ValueError):
                 continue
         restored[f"{sid}_{pid}_{tid}"] = {
-            "season_id": sid,
-            "player_id": pid,
-            "team_id": tid,
-            "player_name": p.get("player_name") or f"id:{pid}",
-            "position_id": p.get("position_id"),
-            "minutes": float(p.get("minutes") or 0),
-            "apps": p.get("apps") or 0,
-            "raw": raw_out,
+            "season_id": sid, "player_id": pid, "team_id": tid,
+            "player_name": p.get("player_name") or f"id:{pid}", "position_id": p.get("position_id"),
+            "minutes": float(p.get("minutes") or 0), "apps": p.get("apps") or 0, "raw": raw_out,
         }
     if not restored:
         return None, None
-    return restored, {
-        "players": len(restored),
-        "updated_at": cached.get("updated_at"),
-        "finished_fixtures": cached.get("finished_fixtures"),
-        "mode": "cache_file",
-        "season_id": sid,
-    }
+    return restored, {"players": len(restored), "updated_at": cached.get("updated_at"), "finished_fixtures": cached.get("finished_fixtures"), "mode": "cache_file", "season_id": sid}
 
 
 def save_aggs(sid, aggs, status):
-    rows_out = [
-        {
-            "player_id": a["player_id"],
-            "team_id": a["team_id"],
-            "player_name": a["player_name"],
-            "position_id": a["position_id"],
-            "minutes": a["minutes"],
-            "apps": a["apps"],
-            "raw": {str(k): v for k, v in a["raw"].items()},
-        }
-        for a in aggs.values()
-    ]
+    rows_out = [{"player_id": a["player_id"], "team_id": a["team_id"], "player_name": a["player_name"], "position_id": a["position_id"], "minutes": a["minutes"], "apps": a["apps"], "raw": {str(k): v for k, v in a["raw"].items()}} for a in aggs.values()]
     safe_status = {k: v for k, v in (status or {}).items() if k != "players"}
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    payload = {
-        "season_id": sid,
-        "updated_at": now,
-        "player_count": len(aggs),
-        "players": rows_out,
-        **safe_status,
-    }
+    payload = {"season_id": sid, "updated_at": now, "player_count": len(aggs), "players": rows_out, **safe_status}
     _save_json(_cache_dir(sid) / "player_team_aggregate.json", payload)
     return payload
 
@@ -1050,11 +905,7 @@ def incremental_update(sid, season_meta_row, force_all=False):
     finished_count = len(finished_ids)
     cached_ids, missing_ids = [], []
     for fid in finished_ids:
-        path = cdir / f"fixture_{fid}.json"
-        if path.exists() and not force_all:
-            cached_ids.append(fid)
-        else:
-            missing_ids.append(fid)
+        (cached_ids if (_cache_dir(sid) / f"fixture_{fid}.json").exists() and not force_all else missing_ids).append(fid)
     loaded, new_fetched, errors = [], 0, []
     for fid in cached_ids:
         data = _load_json(cdir / f"fixture_{fid}.json")
@@ -1071,39 +922,14 @@ def incremental_update(sid, season_meta_row, force_all=False):
                 new_fetched += 1
         if prog:
             prog.progress((i + 1) / max(len(missing_ids), 1))
-    agg_path = cdir / "player_team_aggregate.json"
-    need_rebuild = (
-        force_all
-        or new_fetched > 0
-        or (not agg_path.exists())
-        or restore_aggs_from_file(sid)[0] is None
-        or finished_count == 0
-    )
+    need_rebuild = force_all or new_fetched > 0 or not (cdir / "player_team_aggregate.json").exists() or restore_aggs_from_file(sid)[0] is None or finished_count == 0
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    if not need_rebuild and agg_path.exists():
+    if not need_rebuild:
         aggs, meta = restore_aggs_from_file(sid)
         if aggs is not None:
-            return (
-                aggs,
-                {
-                    "finished_fixtures": finished_count,
-                    "new_fetched": 0,
-                    "players": len(aggs),
-                    "updated_at": (meta or {}).get("updated_at") or now,
-                    "mode": "incremental_skip_rebuild",
-                    "season_id": sid,
-                },
-                errors,
-            )
+            return aggs, {"finished_fixtures": finished_count, "new_fetched": 0, "players": len(aggs), "updated_at": (meta or {}).get("updated_at") or now, "mode": "incremental_skip_rebuild", "season_id": sid}, errors
     aggs = aggregate_player_team(loaded, sid)
-    status = {
-        "finished_fixtures": finished_count,
-        "new_fetched": new_fetched,
-        "players": len(aggs),
-        "mode": "rebuild",
-        "season_id": sid,
-        "updated_at": now,
-    }
+    status = {"finished_fixtures": finished_count, "new_fetched": new_fetched, "players": len(aggs), "mode": "rebuild", "season_id": sid, "updated_at": now}
     save_aggs(sid, aggs, status)
     return aggs, status, errors
 
@@ -1113,33 +939,22 @@ if st.session_state.get("fx_aggs") is None:
         aggs, meta = restore_aggs_from_file(season_id)
         if aggs is not None:
             st.session_state.fx_aggs = aggs
-            st.session_state.fx_status = meta or {
-                "players": len(aggs),
-                "mode": "cache_file",
-                "season_id": season_id,
-            }
+            st.session_state.fx_status = meta or {"players": len(aggs), "mode": "cache_file", "season_id": season_id}
             st.session_state.fx_errors = []
         else:
             aggs, status, errors = incremental_update(season_id, season_info, force_all=False)
-            st.session_state.fx_aggs = aggs
-            st.session_state.fx_status = status
-            st.session_state.fx_errors = errors
+            st.session_state.fx_aggs, st.session_state.fx_status, st.session_state.fx_errors = aggs, status, errors
 
 aggs = st.session_state.get("fx_aggs")
 status = st.session_state.get("fx_status") or {}
 as_of = as_of_date_from_status(status)
-st.caption(
-    f"{T['connected']} · {T['last_updated']}: **{format_updated_at(status.get('updated_at'))}** · "
-    f"Players: {status.get('players') or (len(aggs) if aggs else 0)} · Season ID: {season_id}"
-)
+st.caption(f"{T['connected']} · {T['last_updated']}: **{format_updated_at(status.get('updated_at'))}** · Players: {status.get('players') or (len(aggs) if aggs else 0)} · Season ID: {season_id}")
 if not aggs:
     st.warning(T["no_fixtures"] if status.get("finished_fixtures") == 0 else T["no_data"])
     st.stop()
 
 players_meta = ensure_player_ages(aggs, show_spinner=True)
-tab_radar, tab_compare, tab_discover, tab_similar = st.tabs(
-    [T["tab_radar"], T["tab_compare"], T["tab_discover"], T["tab_similar"]]
-)
+tab_radar, tab_compare, tab_discover, tab_similar = st.tabs([T["tab_radar"], T["tab_compare"], T["tab_discover"], T["tab_similar"]])
 
 with tab_radar:
     f1, f2 = st.columns(2)
@@ -1165,33 +980,20 @@ with tab_radar:
         st.markdown(f"##### {T['player']}")
         choice_r = st.selectbox(T["player"], labels_r, key="player_radar", label_visibility="collapsed")
         sel = all_r[labels_r.index(choice_r)]
-        pos = sel["Pos"]
-        mdefs = POSITION_METRICS[pos]
-        n_pos = len(by_pos_r[pos])
+        pos, mdefs, n_pos = sel["Pos"], POSITION_METRICS[sel["Pos"]], len(by_pos_r[sel["Pos"]])
         is_small = n_pos < SMALL_SAMPLE_N
         age_str = fmt_age(sel.get("Age"))
-        club_uri = None
-        url = team_id_to_logo.get(sel.get("TeamId"))
-        if url:
-            club_uri = fetch_image_data_uri(url)
-        logo_html = (
-            f'<img src="{club_uri}" style="height:40px;width:40px;object-fit:contain;margin-right:10px;vertical-align:middle;" />'
-            if club_uri
-            else ""
-        )
+        club_uri = fetch_image_data_uri(team_id_to_logo[sel["TeamId"]]) if team_id_to_logo.get(sel.get("TeamId")) else None
+        logo_html = f'<img src="{club_uri}" style="height:40px;width:40px;object-fit:contain;margin-right:10px;vertical-align:middle;" />' if club_uri else ""
         st.markdown(
-            f"""
-            <div style="border:1px solid #D7E0EC;border-radius:12px;padding:14px 16px;margin:8px 0 14px;background:#F8FAFC;display:flex;align-items:center;">
+            f"""<div style="border:1px solid #D7E0EC;border-radius:12px;padding:14px 16px;margin:8px 0 14px;background:#F8FAFC;display:flex;align-items:center;">
               {logo_html}
               <div>
                 <div style="font-size:22px;font-weight:750;color:{NAVY};">{sel['Player']}</div>
-                <div style="margin-top:6px;color:#334155;font-size:14px;">
-                  {sel['Team']} · <b>{pos}</b> · {age_str} · {sel['Minutes']} min · {T['apps']} {sel['Apps']}
-                </div>
+                <div style="margin-top:6px;color:#334155;font-size:14px;">{sel['Team']} · <b>{pos}</b> · {age_str} · {sel['Minutes']} min · {T['apps']} {sel['Apps']}</div>
                 <div style="margin-top:4px;color:#64748B;font-size:12px;">Superliga {season_name}</div>
               </div>
-            </div>
-            """,
+            </div>""",
             unsafe_allow_html=True,
         )
         if is_small:
@@ -1200,29 +1002,21 @@ with tab_radar:
             st.markdown(T["pct_body"])
             st.caption(T["band_legend"])
         st.markdown(f"##### {T['radar']}")
-        sample_line = f"{pos}, ≥{int(min_min_r)}′ (n={n_pos})"
-        if is_small:
-            sample_line += " · ⚠ small" if is_en else " · ⚠ 母集団小"
+        sample_line = f"{pos}, ≥{int(min_min_r)}′ (n={n_pos})" + ((" · ⚠ small" if is_en else " · ⚠ 母集団小") if is_small else "")
         fig_kwargs = {
             "labels": [m["label"] for m in mdefs],
             "values_a": [sel.get("pct", {}).get(m["key"]) or 0 for m in mdefs],
-            "title_lines": [
-                sel["Player"],
-                f"{sel['Team']} | {pos} | {age_str} | {sel['Minutes']} min",
-                f"Superliga {season_name} · Percentile radar",
-            ],
+            "title_lines": [sel["Player"], f"{sel['Team']} | {pos} | {age_str} | {sel['Minutes']} min", f"Superliga {season_name} · Percentile radar"],
             "footnotes": [
                 f"Shape = percentile · Vertex = band · Ring = 100 · {sample_line}",
                 "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30",
                 "Per90 = Minutes Played · Fixture aggregate · Sportmonks",
                 f"Superliga {season_name} · Superliga Radar · @Dalaprospect",
             ],
-            "display_texts": [
-                fmt_radar_label(sel["metrics"].get(m["key"]), is_ratio=(m["kind"] == "ratio"))
-                for m in mdefs
-            ],
+            "display_texts": [fmt_radar_label(sel["metrics"].get(m["key"]), is_ratio=(m["kind"] == "ratio")) for m in mdefs],
             "name_a": sel["Player"],
             "marker_colors_a": [percentile_band(sel.get("pct", {}).get(m["key"]))[1] for m in mdefs],
+            "club_logo_uri": club_uri,
         }
         st.caption(T["band_legend"])
         render_radar(fig_kwargs, sel["Player"].replace(" ", "_"))
@@ -1230,30 +1024,11 @@ with tab_radar:
         na = short_name(sel["Player"])
         rows = []
         for m in mdefs:
-            raw_v = (
-                sel["raw"].get(m["tid"], 0)
-                if m["kind"] in ("per90", "lower_better_per90")
-                else f"{fmt_num(sel['raw'].get(m['num'], 0))} / {fmt_num(sel['raw'].get(m['den'], 0))}"
-            )
-            rows.append(
-                {
-                    "Metric": m["label"],
-                    f"{na} Per90/%": fmt_num(sel["metrics"].get(m["key"]), "per90"),
-                    f"{na} %ile": fmt_num(sel.get("pct", {}).get(m["key"]), "pct"),
-                    "Raw": raw_v if isinstance(raw_v, str) else fmt_num(raw_v, "raw"),
-                    "Band": percentile_band(sel.get("pct", {}).get(m["key"]))[0],
-                }
-            )
+            raw_v = sel["raw"].get(m["tid"], 0) if m["kind"] in ("per90", "lower_better_per90") else f"{fmt_num(sel['raw'].get(m['num'], 0))} / {fmt_num(sel['raw'].get(m['den'], 0))}"
+            rows.append({"Metric": m["label"], f"{na} Per90/%": fmt_num(sel["metrics"].get(m["key"]), "per90"), f"{na} %ile": fmt_num(sel.get("pct", {}).get(m["key"]), "pct"), "Raw": raw_v if isinstance(raw_v, str) else fmt_num(raw_v, "raw"), "Band": percentile_band(sel.get("pct", {}).get(m["key"]))[0]})
         df = pd.DataFrame(rows)
         pct_cols = [c for c in df.columns if "%ile" in c]
-        if pct_cols:
-            st.dataframe(
-                df.style.map(style_percentile_col, subset=pct_cols),
-                use_container_width=True,
-                hide_index=True,
-            )
-        else:
-            st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df.style.map(style_percentile_col, subset=pct_cols) if pct_cols else df, use_container_width=True, hide_index=True)
 
 with tab_compare:
     c1, c2 = st.columns(2)
@@ -1273,77 +1048,35 @@ with tab_compare:
         a_col, b_col = st.columns(2)
         with a_col:
             team_a = st.selectbox(T["team_a"], [T["all_teams"]] + teams_in_pos, key="cmp_team_a")
-            pool_a = pool if team_a == T["all_teams"] else [g for g in pool if g["Team"] == team_a]
-            pool_a = sorted(pool_a, key=lambda g: (g["Player"] or "").lower())
+            pool_a = sorted(pool if team_a == T["all_teams"] else [g for g in pool if g["Team"] == team_a], key=lambda g: (g["Player"] or "").lower())
             labels_a = [f"{g['Player']} · {g['Team']} · {g['Minutes']}′" for g in pool_a]
-            if not labels_a:
-                st.warning(T["no_players"])
-                sel_a = None
-            else:
-                choice_a = st.selectbox(T["player_a"], labels_a, key="cmp_player_a")
-                sel_a = pool_a[labels_a.index(choice_a)]
+            sel_a = pool_a[labels_a.index(st.selectbox(T["player_a"], labels_a, key="cmp_player_a"))] if labels_a else None
         with b_col:
             team_b = st.selectbox(T["team_b"], [T["all_teams"]] + teams_in_pos, key="cmp_team_b")
-            pool_b = pool if team_b == T["all_teams"] else [g for g in pool if g["Team"] == team_b]
-            pool_b = sorted(pool_b, key=lambda g: (g["Player"] or "").lower())
+            pool_b = sorted(pool if team_b == T["all_teams"] else [g for g in pool if g["Team"] == team_b], key=lambda g: (g["Player"] or "").lower())
             labels_b = [f"{g['Player']} · {g['Team']} · {g['Minutes']}′" for g in pool_b]
-            if not labels_b:
-                st.warning(T["no_players"])
-                sel_b = None
-            else:
-                choice_b = st.selectbox(T["player_b"], labels_b, key="cmp_player_b")
-                sel_b = pool_b[labels_b.index(choice_b)]
+            sel_b = pool_b[labels_b.index(st.selectbox(T["player_b"], labels_b, key="cmp_player_b"))] if labels_b else None
         if sel_a is not None and sel_b is not None:
             if player_key(sel_a) == player_key(sel_b):
                 st.info("Select two different players." if is_en else "別の選手を選んでください。")
             else:
                 mdefs = POSITION_METRICS[pos_c]
-                sample_line = f"{pos_c}, ≥{int(min_min_c)}′ (n={n_pos})"
                 fig_kwargs = {
                     "labels": [m["label"] for m in mdefs],
                     "values_a": [sel_a.get("pct", {}).get(m["key"]) or 0 for m in mdefs],
-                    "title_lines": [
-                        f"{sel_a['Player']}  vs  {sel_b['Player']}",
-                        f"{pos_c} · Superliga {season_name}",
-                        "Percentile comparison",
-                    ],
-                    "footnotes": [
-                        f"Overlay = percentile · Ring = 100 · {sample_line}",
-                        f"Navy = {sel_a['Player']} · Orange = {sel_b['Player']}",
-                        "Same position only · Numbers in table below",
-                        f"Superliga {season_name} · Superliga Radar · @Dalaprospect",
-                    ],
+                    "title_lines": [f"{sel_a['Player']}  vs  {sel_b['Player']}", f"{pos_c} · Superliga {season_name}", "Percentile comparison"],
+                    "footnotes": [f"Overlay = percentile · Ring = 100 · {pos_c}, ≥{int(min_min_c)}′ (n={n_pos})", f"Navy = {sel_a['Player']} · Orange = {sel_b['Player']}", "Same position only · Numbers in table below", f"Superliga {season_name} · Superliga Radar · @Dalaprospect"],
                     "display_texts": None,
                     "values_b": [sel_b.get("pct", {}).get(m["key"]) or 0 for m in mdefs],
-                    "name_a": sel_a["Player"],
-                    "name_b": sel_b["Player"],
-                    "marker_colors_a": None,
+                    "name_a": sel_a["Player"], "name_b": sel_b["Player"],
+                    "marker_colors_a": None, "club_logo_uri": None,
                 }
                 st.markdown(f"##### {T['radar']}")
-                render_radar(
-                    fig_kwargs,
-                    f"{sel_a['Player'].replace(' ', '_')}_vs_{sel_b['Player'].replace(' ', '_')}",
-                )
-                st.markdown(f"##### {T['stats']}")
+                render_radar(fig_kwargs, f"{sel_a['Player'].replace(' ', '_')}_vs_{sel_b['Player'].replace(' ', '_')}")
                 na, nb = short_name(sel_a["Player"]), short_name(sel_b["Player"])
-                rows = []
-                for m in mdefs:
-                    rows.append(
-                        {
-                            "Metric": m["label"],
-                            f"{na} Per90/%": fmt_num(sel_a["metrics"].get(m["key"]), "per90"),
-                            f"{na} %ile": fmt_num(sel_a.get("pct", {}).get(m["key"]), "pct"),
-                            f"{nb} Per90/%": fmt_num(sel_b["metrics"].get(m["key"]), "per90"),
-                            f"{nb} %ile": fmt_num(sel_b.get("pct", {}).get(m["key"]), "pct"),
-                        }
-                    )
+                rows = [{"Metric": m["label"], f"{na} Per90/%": fmt_num(sel_a["metrics"].get(m["key"]), "per90"), f"{na} %ile": fmt_num(sel_a.get("pct", {}).get(m["key"]), "pct"), f"{nb} Per90/%": fmt_num(sel_b["metrics"].get(m["key"]), "per90"), f"{nb} %ile": fmt_num(sel_b.get("pct", {}).get(m["key"]), "pct")} for m in mdefs]
                 df = pd.DataFrame(rows)
-                pct_cols = [c for c in df.columns if "%ile" in c]
-                st.dataframe(
-                    df.style.map(style_percentile_col, subset=pct_cols),
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                st.dataframe(df.style.map(style_percentile_col, subset=[c for c in df.columns if "%ile" in c]), use_container_width=True, hide_index=True)
 
 with tab_discover:
     st.caption(T["discover_hint"])
@@ -1359,9 +1092,8 @@ with tab_discover:
         team_d = st.selectbox(T["team"], [T["all_teams"]] + teams_d, key="disc_team")
     if team_d != T["all_teams"]:
         pool_d = [g for g in pool_d if g["Team"] == team_d]
-    n_pos = len(by_pos_d[pos_d])
-    if 0 < n_pos < SMALL_SAMPLE_N:
-        st.warning(T["small_sample"].format(n=n_pos))
+    if 0 < len(by_pos_d[pos_d]) < SMALL_SAMPLE_N:
+        st.warning(T["small_sample"].format(n=len(by_pos_d[pos_d])))
     mdefs = POSITION_METRICS[pos_d]
     st.markdown(f"##### {T['metric_filters']}")
     active_filters = []
@@ -1373,30 +1105,14 @@ with tab_discover:
             st.caption(T["min_pct"] if use else "")
         with cols[2]:
             if use:
-                thr = st.selectbox(
-                    T["min_pct"],
-                    PCT_THRESHOLDS,
-                    index=2,
-                    key=f"disc_thr_{m['key']}",
-                    label_visibility="collapsed",
-                )
-                active_filters.append((m, thr))
+                active_filters.append((m, st.selectbox(T["min_pct"], PCT_THRESHOLDS, index=2, key=f"disc_thr_{m['key']}", label_visibility="collapsed")))
             else:
                 st.write("")
     st.markdown(f"##### {T['results']}")
     if not active_filters:
         st.info("Enable at least one metric filter." if is_en else "1つ以上の指標フィルタを有効にしてください。")
     else:
-        results = []
-        for g in pool_d:
-            ok = True
-            for m, thr in active_filters:
-                p = g.get("pct", {}).get(m["key"])
-                if p is None or p < thr:
-                    ok = False
-                    break
-            if ok:
-                results.append(g)
+        results = [g for g in pool_d if all((g.get("pct", {}).get(m["key"]) or -1) >= thr for m, thr in active_filters)]
         if not results:
             st.warning(T["no_results"])
         else:
@@ -1404,13 +1120,7 @@ with tab_discover:
             results.sort(key=lambda g: g.get("pct", {}).get(sort_key) or 0, reverse=True)
             rows = []
             for g in results:
-                row = {
-                    "Player": g["Player"],
-                    "Team": g["Team"],
-                    T["age"]: fmt_age(g.get("Age")),
-                    "Pos": g["Pos"],
-                    "Minutes": g["Minutes"],
-                }
+                row = {"Player": g["Player"], "Team": g["Team"], T["age"]: fmt_age(g.get("Age")), "Pos": g["Pos"], "Minutes": g["Minutes"]}
                 for m, _thr in active_filters:
                     row[m["label"]] = fmt_num(g["metrics"].get(m["key"]), "per90")
                     row[f"{m['label']} %ile"] = fmt_num(g.get("pct", {}).get(m["key"]), "pct")
@@ -1418,14 +1128,7 @@ with tab_discover:
             df = pd.DataFrame(rows)
             pct_cols = [c for c in df.columns if "%ile" in c]
             st.caption(f"{len(results)} players")
-            if pct_cols:
-                st.dataframe(
-                    df.style.map(style_percentile_col, subset=pct_cols),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            else:
-                st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df.style.map(style_percentile_col, subset=pct_cols) if pct_cols else df, use_container_width=True, hide_index=True)
 
 with tab_similar:
     st.caption(T["similar_hint"])
@@ -1439,8 +1142,7 @@ with tab_similar:
     teams_s = sorted({str(g["Team"]) for g in pool_s if g.get("Team")})
     with s3:
         team_s = st.selectbox(T["team"], [T["all_teams"]] + teams_s, key="sim_team")
-    pool_ref = pool_s if team_s == T["all_teams"] else [g for g in pool_s if g["Team"] == team_s]
-    pool_ref = sorted(pool_ref, key=lambda g: (g["Player"] or "").lower())
+    pool_ref = sorted(pool_s if team_s == T["all_teams"] else [g for g in pool_s if g["Team"] == team_s], key=lambda g: (g["Player"] or "").lower())
     n_pos = len(pool_s)
     if 0 < n_pos < SMALL_SAMPLE_N:
         st.warning(T["small_sample"].format(n=n_pos))
@@ -1448,88 +1150,39 @@ with tab_similar:
         st.warning(T["no_similar"])
     else:
         labels_ref = [f"{g['Player']} · {g['Team']} · {g['Minutes']}′" for g in pool_ref]
-        choice_ref = st.selectbox(T["ref_player"], labels_ref, key="sim_ref")
-        ref = pool_ref[labels_ref.index(choice_ref)]
+        ref = pool_ref[labels_ref.index(st.selectbox(T["ref_player"], labels_ref, key="sim_ref"))]
         top_n = st.selectbox(T["top_n"], [5, 10, 15], index=1, key="sim_topn")
         mdefs = POSITION_METRICS[pos_s]
         ref_vec = pct_vector(ref, mdefs)
-        scored = []
-        for g in pool_s:
-            if player_key(g) == player_key(ref):
-                continue
-            scored.append((similarity_score(ref_vec, pct_vector(g, mdefs)), g))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        scored = scored[: int(top_n)]
+        scored = sorted([(similarity_score(ref_vec, pct_vector(g, mdefs)), g) for g in pool_s if player_key(g) != player_key(ref)], key=lambda x: x[0], reverse=True)[: int(top_n)]
         st.markdown(f"##### {T['results']}")
         if not scored:
             st.warning(T["no_similar"])
         else:
-            rows = [
-                {
-                    "#": "★",
-                    "Player": ref["Player"],
-                    "Team": ref["Team"],
-                    T["age"]: fmt_age(ref.get("Age")),
-                    "Minutes": ref["Minutes"],
-                    T["similarity"]: fmt_num(100, "pct"),
-                }
-            ]
+            rows = [{"#": "★", "Player": ref["Player"], "Team": ref["Team"], T["age"]: fmt_age(ref.get("Age")), "Minutes": ref["Minutes"], T["similarity"]: fmt_num(100, "pct")}]
             for m in mdefs[:4]:
                 rows[0][f"{m['label']} %ile"] = fmt_num(ref.get("pct", {}).get(m["key"]), "pct")
             for rank, (sim, g) in enumerate(scored, start=1):
-                row = {
-                    "#": rank,
-                    "Player": g["Player"],
-                    "Team": g["Team"],
-                    T["age"]: fmt_age(g.get("Age")),
-                    "Minutes": g["Minutes"],
-                    T["similarity"]: fmt_num(sim, "pct"),
-                }
+                row = {"#": rank, "Player": g["Player"], "Team": g["Team"], T["age"]: fmt_age(g.get("Age")), "Minutes": g["Minutes"], T["similarity"]: fmt_num(sim, "pct")}
                 for m in mdefs[:4]:
                     row[f"{m['label']} %ile"] = fmt_num(g.get("pct", {}).get(m["key"]), "pct")
                 rows.append(row)
             df = pd.DataFrame(rows)
             pct_cols = [c for c in df.columns if "%ile" in c]
-            st.caption(
-                f"{ref['Player']} · {pos_s} · n={n_pos}"
-                + (" · ★ = reference" if is_en else " · ★ = 基準選手")
-            )
-            if pct_cols:
-                st.dataframe(
-                    df.style.map(style_percentile_col, subset=pct_cols),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            else:
-                st.dataframe(df, use_container_width=True, hide_index=True)
+            st.caption(f"{ref['Player']} · {pos_s} · n={n_pos}" + (" · ★ = reference" if is_en else " · ★ = 基準選手"))
+            st.dataframe(df.style.map(style_percentile_col, subset=pct_cols) if pct_cols else df, use_container_width=True, hide_index=True)
 
 with st.expander(T["method_title"], expanded=False):
-    st.markdown(
-        "形=Percentile · 類似度=同ポジションのPercentileベクトル距離 · 年齢=データ抽出日時点"
-        if not is_en
-        else "Shape=percentile · Similarity=percentile-vector distance · Age=as of data extract date"
-    )
+    st.markdown("形=Percentile · 類似度=同ポジションのPercentileベクトル距離 · 年齢=データ抽出日時点" if not is_en else "Shape=percentile · Similarity=percentile-vector distance · Age=as of data extract date")
 
 with st.expander(T["admin_title"], expanded=False):
     force_all = st.checkbox(T["force"], value=False)
     if st.button(T["update"], type="primary"):
         with st.spinner(T["updating"]):
-            aggs2, status2, errors2 = incremental_update(
-                season_id, season_info, force_all=force_all
-            )
-            st.session_state.fx_aggs = aggs2
-            st.session_state.fx_status = status2
-            st.session_state.fx_errors = errors2
+            aggs2, status2, errors2 = incremental_update(season_id, season_info, force_all=force_all)
+            st.session_state.fx_aggs, st.session_state.fx_status, st.session_state.fx_errors = aggs2, status2, errors2
             st.session_state.loaded_season_id = season_id
             st.session_state.pop("pools_data", None)
             st.session_state.pop("_pools_key", None)
             st.rerun()
-    st.write(
-        {
-            "season_id": season_id,
-            "players": status.get("players") or (len(aggs) if aggs else 0),
-            "updated_at": status.get("updated_at"),
-            "mode": status.get("mode"),
-            "age_as_of": as_of.isoformat(),
-        }
-    )
+    st.write({"season_id": season_id, "players": status.get("players") or (len(aggs) if aggs else 0), "updated_at": status.get("updated_at"), "mode": status.get("mode"), "age_as_of": as_of.isoformat()})
