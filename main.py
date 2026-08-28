@@ -127,7 +127,6 @@ def short_name(name, n=14):
 
 
 def calc_age(dob_str, as_of):
-    """満年齢。dob_str は YYYY-MM-DD。欠損は None。"""
     if not dob_str or as_of is None:
         return None
     try:
@@ -284,6 +283,11 @@ T = {
     "no_similar": "Not enough players to compare." if is_en else "比較できる選手が足りません。",
     "age": "Age" if is_en else "年齢",
     "ages_loading": "Loading player ages..." if is_en else "年齢データを取得中...",
+    "png_fallback": (
+        "PNG export is unavailable right now. Showing interactive chart instead."
+        if is_en
+        else "PNG書き出しが使えないため、画面上のチャートのみ表示しています。"
+    ),
 }
 
 st.markdown(
@@ -426,7 +430,6 @@ def format_updated_at(iso_str):
 
 
 def as_of_date_from_status(status_obj):
-    """年齢起算日 = データ抽出日（updated_at）。なければ今日。"""
     iso = (status_obj or {}).get("updated_at")
     if iso:
         try:
@@ -469,8 +472,15 @@ def fetch_player_dob(player_id):
         return None
 
 
+class nullcontext:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
 def ensure_player_ages(aggs, show_spinner=True):
-    """未取得の選手生年月日をAPI取得して players_meta に保存。"""
     meta = load_players_meta()
     needed = set()
     for a in (aggs or {}).values():
@@ -488,20 +498,15 @@ def ensure_player_ages(aggs, show_spinner=True):
     with spinner_ctx:
         for i, pid in enumerate(sorted(needed)):
             dob = fetch_player_dob(pid)
-            meta[str(pid)] = {"dob": dob, "fetched_at": datetime.now(timezone.utc).isoformat()}
+            meta[str(pid)] = {
+                "dob": dob,
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+            }
             if (i + 1) % 20 == 0:
                 save_players_meta(meta)
             time.sleep(0.05)
         save_players_meta(meta)
     return meta
-
-
-class nullcontext:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
 
 
 def _parse_ymd(s):
@@ -893,8 +898,9 @@ def render_png(fig, fname_base):
             mime="image/png",
         )
         return True
-    except Exception as e:
-        st.warning(str(e))
+    except Exception:
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(T["png_fallback"])
         return False
 
 
@@ -1342,7 +1348,6 @@ if not aggs:
     st.warning(T["no_fixtures"] if status.get("finished_fixtures") == 0 else T["no_data"])
     st.stop()
 
-# 年齢メタ（未取得分のみAPI）
 players_meta = ensure_player_ages(aggs, show_spinner=True)
 
 tab_radar, tab_compare, tab_discover, tab_similar = st.tabs(
@@ -1447,7 +1452,6 @@ with tab_radar:
             "Per90 = Minutes Played · Fixture aggregate · Sportmonks",
             f"Superliga {season_name} · Superliga Radar · @Dalaprospect",
         ]
-        # 画像2行目: チーム | ポジション | 年齢(数字のみ) | 出場分
         title_lines = [
             sel["Player"],
             f"{sel['Team']} | {pos} | {age_str} | {sel['Minutes']} min",
