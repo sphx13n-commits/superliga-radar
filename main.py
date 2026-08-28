@@ -112,10 +112,7 @@ def fmt_radar_label(v, is_ratio=False):
     if is_ratio:
         s = f"{x:.1f}"
     else:
-        if abs(x) >= 10:
-            s = f"{x:.1f}"
-        else:
-            s = f"{x:.2f}"
+        s = f"{x:.1f}" if abs(x) >= 10 else f"{x:.2f}"
     return s.rstrip("0").rstrip(".") or "0"
 
 
@@ -283,11 +280,6 @@ T = {
     "no_similar": "Not enough players to compare." if is_en else "比較できる選手が足りません。",
     "age": "Age" if is_en else "年齢",
     "ages_loading": "Loading player ages..." if is_en else "年齢データを取得中...",
-    "png_fallback": (
-        "PNG export is unavailable right now. Showing interactive chart instead."
-        if is_en
-        else "PNG書き出しが使えないため、画面上のチャートのみ表示しています。"
-    ),
 }
 
 st.markdown(
@@ -490,10 +482,8 @@ def ensure_player_ages(aggs, show_spinner=True):
         key = str(pid)
         if key not in meta or not (meta[key] or {}).get("dob"):
             needed.add(int(pid))
-
     if not needed:
         return meta
-
     spinner_ctx = st.spinner(T["ages_loading"]) if show_spinner else nullcontext()
     with spinner_ctx:
         for i, pid in enumerate(sorted(needed)):
@@ -527,6 +517,87 @@ def _date_chunks(start_s, end_s, max_days=MAX_BETWEEN_DAYS):
     return chunks
 
 
+def _radar_traces(
+    labels,
+    values_a,
+    display_texts=None,
+    values_b=None,
+    name_a=None,
+    name_b=None,
+    marker_colors_a=None,
+    compact=False,
+):
+    traces = []
+    n = len(labels)
+    theta = labels + [labels[0]]
+    if marker_colors_a and values_b is None:
+        m_colors = list(marker_colors_a) + [marker_colors_a[0]]
+    else:
+        m_colors = NAVY
+    traces.append(
+        go.Scatterpolar(
+            r=values_a + [values_a[0]],
+            theta=theta,
+            fill="toself",
+            fillcolor=NAVY_SOFT,
+            line={"color": NAVY, "width": 2.8 if compact else 3.4},
+            marker={
+                "color": m_colors,
+                "size": 11 if compact else 16,
+                "line": {"color": NAVY, "width": 1.4},
+            },
+            mode="lines+markers",
+            name=name_a or "A",
+            hovertemplate="%{theta}: %{r:.0f}<extra>" + (name_a or "A") + "</extra>",
+        )
+    )
+    if values_b is not None:
+        traces.append(
+            go.Scatterpolar(
+                r=values_b + [values_b[0]],
+                theta=theta,
+                fill="toself",
+                fillcolor=ACCENT_SOFT,
+                line={"color": ACCENT, "width": 2.8 if compact else 3.4},
+                marker={
+                    "color": ACCENT,
+                    "size": 11 if compact else 16,
+                    "line": {"color": WHITE, "width": 1.2},
+                },
+                mode="lines+markers",
+                name=name_b or "B",
+                hovertemplate="%{theta}: %{r:.0f}<extra>" + (name_b or "B") + "</extra>",
+            )
+        )
+    traces.append(
+        go.Scatterpolar(
+            r=[100.0] * (n + 1),
+            theta=theta,
+            mode="lines",
+            line={"color": RING_100, "width": 2.2 if compact else 2.6},
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
+    if values_b is None and display_texts is not None:
+        traces.append(
+            go.Scatterpolar(
+                r=[108] * (n + 1),
+                theta=theta,
+                mode="text",
+                text=list(display_texts) + [display_texts[0]],
+                textfont={
+                    "size": 12 if compact else 18,
+                    "color": NAVY,
+                    "family": "Arial Black, Arial, sans-serif",
+                },
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+    return traces
+
+
 def build_radar_figure(
     labels,
     values_a,
@@ -538,92 +609,79 @@ def build_radar_figure(
     name_b=None,
     marker_colors_a=None,
     club_logo_uri=None,
+    mode="export",
 ):
     fig = go.Figure()
-    n = len(labels)
-    theta = labels + [labels[0]]
-
-    if marker_colors_a and values_b is None:
-        m_colors = list(marker_colors_a) + [marker_colors_a[0]]
-    else:
-        m_colors = NAVY
-
-    r_a = values_a + [values_a[0]]
-    fig.add_trace(
-        go.Scatterpolar(
-            r=r_a,
-            theta=theta,
-            fill="toself",
-            fillcolor=NAVY_SOFT,
-            line={"color": NAVY, "width": 3.4},
-            marker={
-                "color": m_colors,
-                "size": 16,
-                "line": {"color": NAVY, "width": 1.8},
-            },
-            mode="lines+markers",
-            name=name_a or "A",
-            hovertemplate="%{theta}: %{r:.0f}<extra>" + (name_a or "A") + "</extra>",
-        )
-    )
-
-    if values_b is not None:
-        r_b = values_b + [values_b[0]]
-        fig.add_trace(
-            go.Scatterpolar(
-                r=r_b,
-                theta=theta,
-                fill="toself",
-                fillcolor=ACCENT_SOFT,
-                line={"color": ACCENT, "width": 3.4},
-                marker={
-                    "color": ACCENT,
-                    "size": 16,
-                    "line": {"color": WHITE, "width": 1.2},
-                },
-                mode="lines+markers",
-                name=name_b or "B",
-                hovertemplate="%{theta}: %{r:.0f}<extra>" + (name_b or "B") + "</extra>",
-            )
-        )
-
-    fig.add_trace(
-        go.Scatterpolar(
-            r=[100.0] * (n + 1),
-            theta=theta,
-            mode="lines",
-            line={"color": RING_100, "width": 2.6},
-            hoverinfo="skip",
-            showlegend=False,
-        )
-    )
-
-    if values_b is None and display_texts is not None:
-        OUTER_R = 108
-        fig.add_trace(
-            go.Scatterpolar(
-                r=[OUTER_R] * (n + 1),
-                theta=theta,
-                mode="text",
-                text=list(display_texts) + [display_texts[0]],
-                textfont={
-                    "size": 18,
-                    "color": NAVY,
-                    "family": "Arial Black, Arial, sans-serif",
-                },
-                hoverinfo="skip",
-                showlegend=False,
-            )
-        )
+    compact = mode == "web"
+    for tr in _radar_traces(
+        labels,
+        values_a,
+        display_texts=display_texts,
+        values_b=values_b,
+        name_a=name_a,
+        name_b=name_b,
+        marker_colors_a=marker_colors_a,
+        compact=compact,
+    ):
+        fig.add_trace(tr)
 
     annotations = []
+    images = []
+
+    if mode == "web":
+        if values_b is not None:
+            annotations.append(
+                {
+                    "text": (
+                        f"<span style='color:{NAVY}'><b>■ {name_a}</b></span>"
+                        f"　<span style='color:{ACCENT}'><b>■ {name_b}</b></span>"
+                    ),
+                    "xref": "paper",
+                    "yref": "paper",
+                    "x": 0.5,
+                    "y": 0.02,
+                    "xanchor": "center",
+                    "yanchor": "bottom",
+                    "showarrow": False,
+                    "font": {"size": 12, "family": "Arial"},
+                }
+            )
+        fig.update_layout(
+            height=520,
+            margin={"l": 30, "r": 30, "t": 20, "b": 40 if values_b is not None else 20},
+            paper_bgcolor=WHITE,
+            plot_bgcolor=WHITE,
+            showlegend=False,
+            annotations=annotations,
+            polar={
+                "domain": {"x": [0.0, 1.0], "y": [0.06 if values_b else 0.0, 1.0]},
+                "bgcolor": BG,
+                "radialaxis": {
+                    "visible": True,
+                    "range": [0, 122],
+                    "tickvals": [0, 20, 40, 60, 80, 100],
+                    "gridcolor": GRID,
+                    "linecolor": AXIS,
+                    "tickfont": {"color": AXIS, "size": 10},
+                },
+                "angularaxis": {
+                    "gridcolor": GRID,
+                    "linecolor": AXIS,
+                    "tickfont": {"color": NAVY, "size": 11, "family": "Arial"},
+                    "rotation": 90,
+                    "direction": "clockwise",
+                },
+            },
+        )
+        return fig
+
+    n = len(labels)
     if values_b is not None:
         title_sizes = [32, 18, 14]
         title_ys = [0.975, 0.935, 0.905]
     else:
         title_sizes = [44, 20, 16]
         title_ys = [0.985, 0.938, 0.905]
-
     for i, line in enumerate(title_lines):
         annotations.append(
             {
@@ -642,7 +700,6 @@ def build_radar_figure(
                 },
             }
         )
-
     if values_b is not None:
         annotations.append(
             {
@@ -660,7 +717,6 @@ def build_radar_figure(
                 "font": {"size": 15, "family": "Arial"},
             }
         )
-
     base_y = 0.118 if values_b is None else 0.108
     for i, line in enumerate(footnotes or []):
         annotations.append(
@@ -676,7 +732,6 @@ def build_radar_figure(
                 "font": {"color": "#374151", "size": 13, "family": "Arial"},
             }
         )
-
     annotations.append(
         {
             "text": "<b>@Dalaprospect</b>",
@@ -690,8 +745,6 @@ def build_radar_figure(
             "font": {"color": NAVY, "size": 14, "family": "Arial"},
         }
     )
-
-    images = []
     if club_logo_uri and values_b is None:
         images.append(
             {
@@ -708,7 +761,6 @@ def build_radar_figure(
                 "layer": "above",
             }
         )
-
     brand = get_logo_data_uri()
     if brand:
         images.append(
@@ -726,7 +778,6 @@ def build_radar_figure(
                 "layer": "above",
             }
         )
-
     fig.update_layout(
         height=1500,
         width=1200,
@@ -759,6 +810,22 @@ def build_radar_figure(
     return fig
 
 
+def render_radar(fig_kwargs, fname_base):
+    fig_web = build_radar_figure(**fig_kwargs, mode="web")
+    st.plotly_chart(fig_web, use_container_width=True)
+    fig_export = build_radar_figure(**fig_kwargs, mode="export")
+    try:
+        png = fig_export.to_image(format="png", width=1200, height=1500, scale=2)
+        st.download_button(
+            T["download"],
+            data=png,
+            file_name=f"{fname_base}_superliga_radar.png",
+            mime="image/png",
+        )
+    except Exception:
+        pass
+
+
 def percentile_rank(values, target, higher_is_better=True):
     n = len(values)
     if n <= 1:
@@ -777,9 +844,7 @@ def compute_metrics(raw, minutes, metric_defs):
     for m in metric_defs:
         if m["kind"] in ("per90", "lower_better_per90"):
             out[m["key"]] = (
-                round(raw.get(m["tid"], 0.0) * 90.0 / minutes, 3)
-                if minutes > 0
-                else None
+                round(raw.get(m["tid"], 0.0) * 90.0 / minutes, 3) if minutes > 0 else None
             )
         elif m["kind"] == "ratio":
             den = raw.get(m["den"], 0.0)
@@ -809,11 +874,7 @@ def player_key(g):
 
 
 def pct_vector(g, mdefs):
-    vec = []
-    for m in mdefs:
-        p = g.get("pct", {}).get(m["key"])
-        vec.append(50.0 if p is None else float(p))
-    return vec
+    return [50.0 if g.get("pct", {}).get(m["key"]) is None else float(g["pct"][m["key"]]) for m in mdefs]
 
 
 def similarity_score(vec_a, vec_b):
@@ -842,10 +903,7 @@ def build_position_pools(aggs, team_id_to_name, min_min, players_meta=None, as_o
             str(a["team_id"]) if a["team_id"] is not None else "Unknown"
         )
         pid = a.get("player_id")
-        dob = None
-        if pid is not None:
-            dob = (players_meta.get(str(pid)) or {}).get("dob")
-        age = calc_age(dob, as_of)
+        dob = (players_meta.get(str(pid)) or {}).get("dob") if pid is not None else None
         by_pos[pos].append(
             {
                 "Player": a["player_name"] or f"id:{a['player_id']}",
@@ -855,25 +913,18 @@ def build_position_pools(aggs, team_id_to_name, min_min, players_meta=None, as_o
                 "Pos": pos,
                 "Minutes": int(round(mins)),
                 "Apps": a["apps"],
-                "Age": age,
+                "Age": calc_age(dob, as_of),
                 "metrics": metrics,
                 "raw": a["raw"],
             }
         )
-
     for pos, group in by_pos.items():
         for m in POSITION_METRICS[pos]:
-            vals = [
-                g["metrics"][m["key"]]
-                for g in group
-                if g["metrics"].get(m["key"]) is not None
-            ]
+            vals = [g["metrics"][m["key"]] for g in group if g["metrics"].get(m["key"]) is not None]
             higher = m["kind"] != "lower_better_per90"
             for g in group:
                 v = g["metrics"].get(m["key"])
-                g.setdefault("pct", {})[m["key"]] = (
-                    None if v is None else percentile_rank(vals, v, higher)
-                )
+                g.setdefault("pct", {})[m["key"]] = None if v is None else percentile_rank(vals, v, higher)
     return by_pos
 
 
@@ -885,23 +936,6 @@ def get_pools_cached(season_id, min_min, aggs, team_id_to_name, players_meta, as
             aggs, team_id_to_name, min_min, players_meta, as_of
         )
     return st.session_state["pools_data"]
-
-
-def render_png(fig, fname_base):
-    try:
-        png = fig.to_image(format="png", width=1200, height=1500, scale=2)
-        st.image(png, use_container_width=True)
-        st.download_button(
-            T["download"],
-            data=png,
-            file_name=f"{fname_base}_superliga_radar.png",
-            mime="image/png",
-        )
-        return True
-    except Exception:
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption(T["png_fallback"])
-        return False
 
 
 league_res = requests.get(
@@ -916,29 +950,18 @@ if league_res.status_code != 200:
 
 league = league_res.json().get("data", {})
 current_season = league.get("currentseason") or league.get("currentSeason") or {}
-season_records = [
-    s for s in league.get("seasons", []) if s.get("id") and s.get("name")
-]
+season_records = [s for s in league.get("seasons", []) if s.get("id") and s.get("name")]
 if not season_records and current_season.get("id"):
     season_records = [current_season]
-
 season_records.sort(
-    key=lambda s: (
-        s.get("id") == current_season.get("id"),
-        s.get("starting_at") or "",
-    ),
+    key=lambda s: (s.get("id") == current_season.get("id"), s.get("starting_at") or ""),
     reverse=True,
 )
 season_records = season_records[:MAX_SEASONS]
-
 season_options = {s["name"]: s["id"] for s in season_records}
 season_meta = {s["id"]: s for s in season_records}
 season_names = list(season_options)
-
-default_name = next(
-    (s["name"] for s in season_records if s["id"] == default_season_id),
-    None,
-)
+default_name = next((s["name"] for s in season_records if s["id"] == default_season_id), None)
 if default_name is None:
     default_name = next(
         (s["name"] for s in season_records if s["id"] == current_season.get("id")),
@@ -987,14 +1010,9 @@ for t in teams:
 
 
 def _paginate_fixtures_window(start, end, filter_str=None):
-    all_fx, page, errors = [], 1, 0
-    last_status = None
+    all_fx, page, last_status = [], 1, None
     while True:
-        req_params = {
-            **params,
-            "include": "state;participants;scores",
-            "page": page,
-        }
+        req_params = {**params, "include": "state;participants;scores", "page": page}
         if filter_str:
             req_params["filters"] = filter_str
         res = requests.get(
@@ -1005,8 +1023,7 @@ def _paginate_fixtures_window(start, end, filter_str=None):
         )
         last_status = res.status_code
         if res.status_code != 200:
-            errors = 1
-            break
+            return all_fx, 1, last_status, None
         body = res.json() or {}
         all_fx.extend(body.get("data") or [])
         if not (body.get("pagination") or {}).get("has_more"):
@@ -1015,14 +1032,12 @@ def _paginate_fixtures_window(start, end, filter_str=None):
         if page > 30:
             break
         time.sleep(0.05)
-    return all_fx, (0 if last_status == 200 else 1), last_status, None
+    return all_fx, 0, last_status, None
 
 
 def _fetch_between_chunked(start_s, end_s, filter_str=None):
     chunks = _date_chunks(start_s, end_s, MAX_BETWEEN_DAYS)
-    all_fx, seen_ids = [], set()
-    total_errors = 0
-    last_status = None
+    all_fx, seen_ids, total_errors, last_status = [], set(), 0, None
     for w_start, w_end in chunks:
         fx, err, status, _ = _paginate_fixtures_window(w_start, w_end, filter_str)
         last_status = status
@@ -1045,16 +1060,10 @@ def fetch_season_fixtures_list(sid, season_meta_row):
     wide_end = min(end, today) if end else today
     if wide_end < wide_start:
         wide_end = wide_start
-
-    fx_a, err_a, _, _, _ = _fetch_between_chunked(
-        wide_start, wide_end, f"fixtureSeasons:{sid}"
-    )
+    fx_a, err_a, _, _, _ = _fetch_between_chunked(wide_start, wide_end, f"fixtureSeasons:{sid}")
     all_fx, errors = fx_a, err_a
-
     if len(all_fx) == 0:
-        fx_b, err_b, _, _, _ = _fetch_between_chunked(
-            wide_start, wide_end, f"fixtureLeagues:{LEAGUE_ID}"
-        )
+        fx_b, err_b, _, _, _ = _fetch_between_chunked(wide_start, wide_end, f"fixtureLeagues:{LEAGUE_ID}")
         filtered = []
         for fx in fx_b:
             fx_sid = fx.get("season_id") or (fx.get("season") or {}).get("id")
@@ -1062,17 +1071,13 @@ def fetch_season_fixtures_list(sid, season_meta_row):
                 filtered.append(fx)
         all_fx = filtered if filtered else fx_b
         errors += err_b
-
     finished = [fx for fx in all_fx if _is_finished_fixture(fx)]
     if len(finished) == 0 and len(all_fx) > 0:
         finished = [
             fx
             for fx in all_fx
-            if fx.get("scores")
-            or fx.get("result_info")
-            or fx.get("state_id") in (5, 7, 8)
+            if fx.get("scores") or fx.get("result_info") or fx.get("state_id") in (5, 7, 8)
         ]
-
     payload = {
         "season_id": sid,
         "total_fetched": len(all_fx),
@@ -1080,11 +1085,7 @@ def fetch_season_fixtures_list(sid, season_meta_row):
         "list_errors": errors,
         "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "fixtures": [
-            {
-                "id": fx.get("id"),
-                "name": fx.get("name"),
-                "starting_at": fx.get("starting_at"),
-            }
+            {"id": fx.get("id"), "name": fx.get("name"), "starting_at": fx.get("starting_at")}
             for fx in finished
             if fx.get("id")
         ],
@@ -1123,14 +1124,8 @@ def aggregate_player_team(fixture_payloads, sid):
             if not pid or not tid:
                 continue
             key = f"{sid}_{pid}_{tid}"
-            pname = (
-                (lu.get("player") or {}).get("name")
-                or lu.get("player_name")
-                or f"id:{pid}"
-            )
-            pos_id = lu.get("position_id") or (
-                (lu.get("player") or {}).get("position_id")
-            )
+            pname = (lu.get("player") or {}).get("name") or lu.get("player_name") or f"id:{pid}"
+            pos_id = lu.get("position_id") or ((lu.get("player") or {}).get("position_id"))
             if key not in aggs:
                 aggs[key] = {
                     "season_id": sid,
@@ -1160,9 +1155,7 @@ def aggregate_player_team(fixture_payloads, sid):
                     if parsed > 0:
                         played = True
                 else:
-                    aggs[key]["raw"][type_id] = (
-                        aggs[key]["raw"].get(type_id, 0.0) + parsed
-                    )
+                    aggs[key]["raw"][type_id] = aggs[key]["raw"].get(type_id, 0.0) + parsed
             if played:
                 aggs[key]["apps"] += 1
     return aggs
@@ -1188,7 +1181,6 @@ def restore_aggs_from_file(sid):
         pid, tid = p.get("player_id"), p.get("team_id")
         if not pid or not tid:
             continue
-        key = f"{sid}_{pid}_{tid}"
         raw_in = p.get("raw") or {}
         raw_out = {}
         if isinstance(raw_in, dict):
@@ -1197,7 +1189,7 @@ def restore_aggs_from_file(sid):
                     raw_out[int(k)] = float(v) if v is not None else 0.0
                 except (TypeError, ValueError):
                     continue
-        restored[key] = {
+        restored[f"{sid}_{pid}_{tid}"] = {
             "season_id": sid,
             "player_id": pid,
             "team_id": tid,
@@ -1209,14 +1201,13 @@ def restore_aggs_from_file(sid):
         }
     if not restored:
         return None, None
-    meta = {
+    return restored, {
         "players": len(restored),
         "updated_at": cached.get("updated_at"),
         "finished_fixtures": cached.get("finished_fixtures"),
         "mode": "cache_file",
         "season_id": sid,
     }
-    return restored, meta
 
 
 def save_aggs(sid, aggs, status):
@@ -1250,7 +1241,6 @@ def incremental_update(sid, season_meta_row, force_all=False):
     flist = fetch_season_fixtures_list(sid, season_meta_row)
     finished_ids = [f["id"] for f in flist.get("fixtures", [])]
     finished_count = len(finished_ids)
-
     cached_ids, missing_ids = [], []
     for fid in finished_ids:
         path = cdir / f"fixture_{fid}.json"
@@ -1258,13 +1248,11 @@ def incremental_update(sid, season_meta_row, force_all=False):
             cached_ids.append(fid)
         else:
             missing_ids.append(fid)
-
     loaded, new_fetched, errors = [], 0, []
     for fid in cached_ids:
         data = _load_json(cdir / f"fixture_{fid}.json")
         if data is not None:
             loaded.append(data)
-
     prog = st.progress(0.0) if missing_ids else None
     for i, fid in enumerate(missing_ids):
         data, source, err = load_fixture_detail(sid, fid, force_refresh=force_all)
@@ -1276,7 +1264,6 @@ def incremental_update(sid, season_meta_row, force_all=False):
                 new_fetched += 1
         if prog:
             prog.progress((i + 1) / max(len(missing_ids), 1))
-
     agg_path = cdir / "player_team_aggregate.json"
     need_rebuild = (
         force_all
@@ -1286,23 +1273,17 @@ def incremental_update(sid, season_meta_row, force_all=False):
         or finished_count == 0
     )
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
     if not need_rebuild and agg_path.exists():
         aggs, meta = restore_aggs_from_file(sid)
         if aggs is not None:
-            return (
-                aggs,
-                {
-                    "finished_fixtures": finished_count,
-                    "new_fetched": 0,
-                    "players": len(aggs),
-                    "updated_at": (meta or {}).get("updated_at") or now,
-                    "mode": "incremental_skip_rebuild",
-                    "season_id": sid,
-                },
-                errors,
-            )
-
+            return aggs, {
+                "finished_fixtures": finished_count,
+                "new_fetched": 0,
+                "players": len(aggs),
+                "updated_at": (meta or {}).get("updated_at") or now,
+                "mode": "incremental_skip_rebuild",
+                "season_id": sid,
+            }, errors
     aggs = aggregate_player_team(loaded, sid)
     status = {
         "finished_fixtures": finished_count,
@@ -1328,9 +1309,7 @@ if st.session_state.get("fx_aggs") is None:
             }
             st.session_state.fx_errors = []
         else:
-            aggs, status, errors = incremental_update(
-                season_id, season_info, force_all=False
-            )
+            aggs, status, errors = incremental_update(season_id, season_info, force_all=False)
             st.session_state.fx_aggs = aggs
             st.session_state.fx_status = status
             st.session_state.fx_errors = errors
@@ -1338,72 +1317,52 @@ if st.session_state.get("fx_aggs") is None:
 aggs = st.session_state.get("fx_aggs")
 status = st.session_state.get("fx_status") or {}
 as_of = as_of_date_from_status(status)
-
 st.caption(
     f"{T['connected']} · {T['last_updated']}: **{format_updated_at(status.get('updated_at'))}** · "
     f"Players: {status.get('players') or (len(aggs) if aggs else 0)} · Season ID: {season_id}"
 )
-
 if not aggs:
     st.warning(T["no_fixtures"] if status.get("finished_fixtures") == 0 else T["no_data"])
     st.stop()
 
 players_meta = ensure_player_ages(aggs, show_spinner=True)
-
 tab_radar, tab_compare, tab_discover, tab_similar = st.tabs(
     [T["tab_radar"], T["tab_compare"], T["tab_discover"], T["tab_similar"]]
 )
 
-# -------------------- RADAR --------------------
 with tab_radar:
     f1, f2 = st.columns(2)
     with f1:
-        min_min_r = st.selectbox(
-            T["min_minutes"], [0, 300, 600, 900], index=1, key="radar_min"
-        )
-    by_pos_r = get_pools_cached(
-        season_id, min_min_r, aggs, team_id_to_name, players_meta, as_of
-    )
+        min_min_r = st.selectbox(T["min_minutes"], [0, 300, 600, 900], index=1, key="radar_min")
+    by_pos_r = get_pools_cached(season_id, min_min_r, aggs, team_id_to_name, players_meta, as_of)
     all_r = [g for pos in by_pos_r.values() for g in pos]
     teams_r = sorted({str(g["Team"]) for g in all_r if g.get("Team")})
     with f2:
-        team_r = st.selectbox(
-            T["team"], [T["all_teams"]] + teams_r, key="radar_team"
-        )
+        team_r = st.selectbox(T["team"], [T["all_teams"]] + teams_r, key="radar_team")
     if team_r != T["all_teams"]:
         all_r = [g for g in all_r if g["Team"] == team_r]
-
     n_total = sum(len(v) for v in by_pos_r.values())
     n_by = {p: len(by_pos_r[p]) for p in POSITIONS}
-    st.caption(
-        f"n={n_total} · GK{n_by['GK']} / DEF{n_by['DEF']} / MID{n_by['MID']} / FWD{n_by['FWD']}"
-    )
+    st.caption(f"n={n_total} · GK{n_by['GK']} / DEF{n_by['DEF']} / MID{n_by['MID']} / FWD{n_by['FWD']}")
     if 0 < n_total < 40:
         st.info(T["early_note"])
-
     if not all_r:
         st.warning(T["no_players"])
     else:
         all_r.sort(key=lambda g: (g["Player"] or "").lower())
-        labels_r = [
-            f"{g['Player']} · {g['Team']} · {g['Pos']} · {g['Minutes']}′" for g in all_r
-        ]
+        labels_r = [f"{g['Player']} · {g['Team']} · {g['Pos']} · {g['Minutes']}′" for g in all_r]
         st.markdown(f"##### {T['player']}")
-        choice_r = st.selectbox(
-            T["player"], labels_r, key="player_radar", label_visibility="collapsed"
-        )
+        choice_r = st.selectbox(T["player"], labels_r, key="player_radar", label_visibility="collapsed")
         sel = all_r[labels_r.index(choice_r)]
         pos = sel["Pos"]
         mdefs = POSITION_METRICS[pos]
         n_pos = len(by_pos_r[pos])
         is_small = n_pos < SMALL_SAMPLE_N
         age_str = fmt_age(sel.get("Age"))
-
         club_uri = None
         url = team_id_to_logo.get(sel.get("TeamId"))
         if url:
             club_uri = fetch_image_data_uri(url)
-
         logo_html = (
             f'<img src="{club_uri}" style="height:40px;width:40px;object-fit:contain;margin-right:10px;vertical-align:middle;" />'
             if club_uri
@@ -1424,14 +1383,11 @@ with tab_radar:
             """,
             unsafe_allow_html=True,
         )
-
         if is_small:
             st.warning(T["small_sample"].format(n=n_pos))
-
         with st.expander(T["pct_title"], expanded=False):
             st.markdown(T["pct_body"])
             st.caption(T["band_legend"])
-
         st.markdown(f"##### {T['radar']}")
         radar_labels = [m["label"] for m in mdefs]
         values_a = [sel.get("pct", {}).get(m["key"]) or 0 for m in mdefs]
@@ -1439,37 +1395,31 @@ with tab_radar:
             fmt_radar_label(sel["metrics"].get(m["key"]), is_ratio=(m["kind"] == "ratio"))
             for m in mdefs
         ]
-        marker_colors_a = [
-            percentile_band(sel.get("pct", {}).get(m["key"]))[1] for m in mdefs
-        ]
+        marker_colors_a = [percentile_band(sel.get("pct", {}).get(m["key"]))[1] for m in mdefs]
         sample_line = f"{pos}, ≥{int(min_min_r)}′ (n={n_pos})"
         if is_small:
             sample_line += " · ⚠ small" if is_en else " · ⚠ 母集団小"
-
-        footnotes = [
-            f"Shape = percentile · Vertex = band · Ring = 100 · {sample_line}",
-            "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30",
-            "Per90 = Minutes Played · Fixture aggregate · Sportmonks",
-            f"Superliga {season_name} · Superliga Radar · @Dalaprospect",
-        ]
-        title_lines = [
-            sel["Player"],
-            f"{sel['Team']} | {pos} | {age_str} | {sel['Minutes']} min",
-            f"Superliga {season_name} · Percentile radar",
-        ]
-        fig = build_radar_figure(
-            radar_labels,
-            values_a,
-            title_lines,
-            footnotes,
-            display_texts=display_a,
-            name_a=sel["Player"],
-            marker_colors_a=marker_colors_a,
-            club_logo_uri=club_uri,
-        )
+        fig_kwargs = {
+            "labels": radar_labels,
+            "values_a": values_a,
+            "title_lines": [
+                sel["Player"],
+                f"{sel['Team']} | {pos} | {age_str} | {sel['Minutes']} min",
+                f"Superliga {season_name} · Percentile radar",
+            ],
+            "footnotes": [
+                f"Shape = percentile · Vertex = band · Ring = 100 · {sample_line}",
+                "Bands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30",
+                "Per90 = Minutes Played · Fixture aggregate · Sportmonks",
+                f"Superliga {season_name} · Superliga Radar · @Dalaprospect",
+            ],
+            "display_texts": display_a,
+            "name_a": sel["Player"],
+            "marker_colors_a": marker_colors_a,
+            "club_logo_uri": club_uri,
+        }
         st.caption(T["band_legend"])
-        render_png(fig, sel["Player"].replace(" ", "_"))
-
+        render_radar(fig_kwargs, sel["Player"].replace(" ", "_"))
         st.markdown(f"##### {T['stats']}")
         na = short_name(sel["Player"])
         rows = []
@@ -1477,10 +1427,7 @@ with tab_radar:
             raw_v = (
                 sel["raw"].get(m["tid"], 0)
                 if m["kind"] in ("per90", "lower_better_per90")
-                else (
-                    f"{fmt_num(sel['raw'].get(m['num'], 0))} / "
-                    f"{fmt_num(sel['raw'].get(m['den'], 0))}"
-                )
+                else f"{fmt_num(sel['raw'].get(m['num'], 0))} / {fmt_num(sel['raw'].get(m['den'], 0))}"
             )
             rows.append(
                 {
@@ -1494,119 +1441,80 @@ with tab_radar:
         df = pd.DataFrame(rows)
         pct_cols = [c for c in df.columns if "%ile" in c]
         if pct_cols:
-            st.dataframe(
-                df.style.map(style_percentile_col, subset=pct_cols),
-                use_container_width=True,
-                hide_index=True,
-            )
+            st.dataframe(df.style.map(style_percentile_col, subset=pct_cols), use_container_width=True, hide_index=True)
         else:
             st.dataframe(df, use_container_width=True, hide_index=True)
 
-# -------------------- COMPARE --------------------
 with tab_compare:
     c1, c2 = st.columns(2)
     with c1:
-        min_min_c = st.selectbox(
-            T["min_minutes"], [0, 300, 600, 900], index=1, key="cmp_min"
-        )
+        min_min_c = st.selectbox(T["min_minutes"], [0, 300, 600, 900], index=1, key="cmp_min")
     with c2:
         pos_c = st.selectbox(T["position"], list(POSITIONS), index=2, key="cmp_pos")
-
-    by_pos_c = get_pools_cached(
-        season_id, min_min_c, aggs, team_id_to_name, players_meta, as_of
-    )
+    by_pos_c = get_pools_cached(season_id, min_min_c, aggs, team_id_to_name, players_meta, as_of)
     pool = by_pos_c[pos_c]
     n_pos = len(pool)
     if 0 < n_pos < SMALL_SAMPLE_N:
         st.warning(T["small_sample"].format(n=n_pos))
-
     teams_in_pos = sorted({str(g["Team"]) for g in pool if g.get("Team")})
     if len(pool) < 2:
         st.warning(T["no_compare"])
     else:
         a_col, b_col = st.columns(2)
         with a_col:
-            team_a = st.selectbox(
-                T["team_a"], [T["all_teams"]] + teams_in_pos, key="cmp_team_a"
-            )
-            pool_a = (
-                pool
-                if team_a == T["all_teams"]
-                else [g for g in pool if g["Team"] == team_a]
-            )
+            team_a = st.selectbox(T["team_a"], [T["all_teams"]] + teams_in_pos, key="cmp_team_a")
+            pool_a = pool if team_a == T["all_teams"] else [g for g in pool if g["Team"] == team_a]
             pool_a = sorted(pool_a, key=lambda g: (g["Player"] or "").lower())
-            labels_a = [
-                f"{g['Player']} · {g['Team']} · {g['Minutes']}′" for g in pool_a
-            ]
+            labels_a = [f"{g['Player']} · {g['Team']} · {g['Minutes']}′" for g in pool_a]
             if not labels_a:
                 st.warning(T["no_players"])
                 sel_a = None
             else:
                 choice_a = st.selectbox(T["player_a"], labels_a, key="cmp_player_a")
                 sel_a = pool_a[labels_a.index(choice_a)]
-
         with b_col:
-            team_b = st.selectbox(
-                T["team_b"], [T["all_teams"]] + teams_in_pos, key="cmp_team_b"
-            )
-            pool_b = (
-                pool
-                if team_b == T["all_teams"]
-                else [g for g in pool if g["Team"] == team_b]
-            )
+            team_b = st.selectbox(T["team_b"], [T["all_teams"]] + teams_in_pos, key="cmp_team_b")
+            pool_b = pool if team_b == T["all_teams"] else [g for g in pool if g["Team"] == team_b]
             pool_b = sorted(pool_b, key=lambda g: (g["Player"] or "").lower())
-            labels_b = [
-                f"{g['Player']} · {g['Team']} · {g['Minutes']}′" for g in pool_b
-            ]
+            labels_b = [f"{g['Player']} · {g['Team']} · {g['Minutes']}′" for g in pool_b]
             if not labels_b:
                 st.warning(T["no_players"])
                 sel_b = None
             else:
                 choice_b = st.selectbox(T["player_b"], labels_b, key="cmp_player_b")
                 sel_b = pool_b[labels_b.index(choice_b)]
-
         if sel_a is not None and sel_b is not None:
             if player_key(sel_a) == player_key(sel_b):
-                st.info(
-                    "Select two different players."
-                    if is_en
-                    else "別の選手を選んでください。"
-                )
+                st.info("Select two different players." if is_en else "別の選手を選んでください。")
             else:
                 mdefs = POSITION_METRICS[pos_c]
-                radar_labels = [m["label"] for m in mdefs]
-                values_a = [sel_a.get("pct", {}).get(m["key"]) or 0 for m in mdefs]
-                values_b = [sel_b.get("pct", {}).get(m["key"]) or 0 for m in mdefs]
                 sample_line = f"{pos_c}, ≥{int(min_min_c)}′ (n={n_pos})"
-                footnotes = [
-                    f"Overlay = percentile · Ring = 100 · {sample_line}",
-                    f"Navy = {sel_a['Player']} · Orange = {sel_b['Player']}",
-                    "Same position only · Numbers in table below",
-                    f"Superliga {season_name} · Superliga Radar · @Dalaprospect",
-                ]
-                title_lines = [
-                    f"{sel_a['Player']}  vs  {sel_b['Player']}",
-                    f"{pos_c} · Superliga {season_name}",
-                    "Percentile comparison",
-                ]
+                fig_kwargs = {
+                    "labels": [m["label"] for m in mdefs],
+                    "values_a": [sel_a.get("pct", {}).get(m["key"]) or 0 for m in mdefs],
+                    "title_lines": [
+                        f"{sel_a['Player']}  vs  {sel_b['Player']}",
+                        f"{pos_c} · Superliga {season_name}",
+                        "Percentile comparison",
+                    ],
+                    "footnotes": [
+                        f"Overlay = percentile · Ring = 100 · {sample_line}",
+                        f"Navy = {sel_a['Player']} · Orange = {sel_b['Player']}",
+                        "Same position only · Numbers in table below",
+                        f"Superliga {season_name} · Superliga Radar · @Dalaprospect",
+                    ],
+                    "display_texts": None,
+                    "values_b": [sel_b.get("pct", {}).get(m["key"]) or 0 for m in mdefs],
+                    "name_a": sel_a["Player"],
+                    "name_b": sel_b["Player"],
+                    "marker_colors_a": None,
+                    "club_logo_uri": None,
+                }
                 st.markdown(f"##### {T['radar']}")
-                fig = build_radar_figure(
-                    radar_labels,
-                    values_a,
-                    title_lines,
-                    footnotes,
-                    display_texts=None,
-                    values_b=values_b,
-                    name_a=sel_a["Player"],
-                    name_b=sel_b["Player"],
-                    marker_colors_a=None,
-                    club_logo_uri=None,
-                )
-                render_png(
-                    fig,
+                render_radar(
+                    fig_kwargs,
                     f"{sel_a['Player'].replace(' ', '_')}_vs_{sel_b['Player'].replace(' ', '_')}",
                 )
-
                 st.markdown(f"##### {T['stats']}")
                 na, nb = short_name(sel_a["Player"]), short_name(sel_b["Player"])
                 rows = []
@@ -1614,54 +1522,33 @@ with tab_compare:
                     rows.append(
                         {
                             "Metric": m["label"],
-                            f"{na} Per90/%": fmt_num(
-                                sel_a["metrics"].get(m["key"]), "per90"
-                            ),
-                            f"{na} %ile": fmt_num(
-                                sel_a.get("pct", {}).get(m["key"]), "pct"
-                            ),
-                            f"{nb} Per90/%": fmt_num(
-                                sel_b["metrics"].get(m["key"]), "per90"
-                            ),
-                            f"{nb} %ile": fmt_num(
-                                sel_b.get("pct", {}).get(m["key"]), "pct"
-                            ),
+                            f"{na} Per90/%": fmt_num(sel_a["metrics"].get(m["key"]), "per90"),
+                            f"{na} %ile": fmt_num(sel_a.get("pct", {}).get(m["key"]), "pct"),
+                            f"{nb} Per90/%": fmt_num(sel_b["metrics"].get(m["key"]), "per90"),
+                            f"{nb} %ile": fmt_num(sel_b.get("pct", {}).get(m["key"]), "pct"),
                         }
                     )
                 df = pd.DataFrame(rows)
                 pct_cols = [c for c in df.columns if "%ile" in c]
-                st.dataframe(
-                    df.style.map(style_percentile_col, subset=pct_cols),
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                st.dataframe(df.style.map(style_percentile_col, subset=pct_cols), use_container_width=True, hide_index=True)
 
-# -------------------- DISCOVER --------------------
 with tab_discover:
     st.caption(T["discover_hint"])
     d1, d2, d3 = st.columns(3)
     with d1:
         pos_d = st.selectbox(T["position"], list(POSITIONS), index=2, key="disc_pos")
     with d2:
-        min_min_d = st.selectbox(
-            T["min_minutes"], [0, 300, 600, 900], index=1, key="disc_min"
-        )
-    by_pos_d = get_pools_cached(
-        season_id, min_min_d, aggs, team_id_to_name, players_meta, as_of
-    )
+        min_min_d = st.selectbox(T["min_minutes"], [0, 300, 600, 900], index=1, key="disc_min")
+    by_pos_d = get_pools_cached(season_id, min_min_d, aggs, team_id_to_name, players_meta, as_of)
     pool_d = by_pos_d[pos_d]
     teams_d = sorted({str(g["Team"]) for g in pool_d if g.get("Team")})
     with d3:
-        team_d = st.selectbox(
-            T["team"], [T["all_teams"]] + teams_d, key="disc_team"
-        )
+        team_d = st.selectbox(T["team"], [T["all_teams"]] + teams_d, key="disc_team")
     if team_d != T["all_teams"]:
         pool_d = [g for g in pool_d if g["Team"] == team_d]
-
     n_pos = len(by_pos_d[pos_d])
     if 0 < n_pos < SMALL_SAMPLE_N:
         st.warning(T["small_sample"].format(n=n_pos))
-
     mdefs = POSITION_METRICS[pos_d]
     st.markdown(f"##### {T['metric_filters']}")
     active_filters = []
@@ -1674,23 +1561,14 @@ with tab_discover:
         with cols[2]:
             if use:
                 thr = st.selectbox(
-                    T["min_pct"],
-                    PCT_THRESHOLDS,
-                    index=2,
-                    key=f"disc_thr_{m['key']}",
-                    label_visibility="collapsed",
+                    T["min_pct"], PCT_THRESHOLDS, index=2, key=f"disc_thr_{m['key']}", label_visibility="collapsed"
                 )
                 active_filters.append((m, thr))
             else:
                 st.write("")
-
     st.markdown(f"##### {T['results']}")
     if not active_filters:
-        st.info(
-            "Enable at least one metric filter."
-            if is_en
-            else "1つ以上の指標フィルタを有効にしてください。"
-        )
+        st.info("Enable at least one metric filter." if is_en else "1つ以上の指標フィルタを有効にしてください。")
     else:
         results = []
         for g in pool_d:
@@ -1702,14 +1580,11 @@ with tab_discover:
                     break
             if ok:
                 results.append(g)
-
         if not results:
             st.warning(T["no_results"])
         else:
             sort_key = active_filters[0][0]["key"]
-            results.sort(
-                key=lambda g: g.get("pct", {}).get(sort_key) or 0, reverse=True
-            )
+            results.sort(key=lambda g: g.get("pct", {}).get(sort_key) or 0, reverse=True)
             rows = []
             for g in results:
                 row = {
@@ -1721,96 +1596,63 @@ with tab_discover:
                 }
                 for m, _thr in active_filters:
                     row[m["label"]] = fmt_num(g["metrics"].get(m["key"]), "per90")
-                    row[f"{m['label']} %ile"] = fmt_num(
-                        g.get("pct", {}).get(m["key"]), "pct"
-                    )
+                    row[f"{m['label']} %ile"] = fmt_num(g.get("pct", {}).get(m["key"]), "pct")
                 rows.append(row)
             df = pd.DataFrame(rows)
             pct_cols = [c for c in df.columns if "%ile" in c]
             st.caption(f"{len(results)} players")
             if pct_cols:
-                st.dataframe(
-                    df.style.map(style_percentile_col, subset=pct_cols),
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                st.dataframe(df.style.map(style_percentile_col, subset=pct_cols), use_container_width=True, hide_index=True)
             else:
                 st.dataframe(df, use_container_width=True, hide_index=True)
-            st.caption(
-                "Open Player Radar tab to view the full radar."
-                if is_en
-                else "詳細は 選手レーダー タブで選手を選んで確認できます。"
-            )
 
-# -------------------- SIMILAR PLAYERS --------------------
 with tab_similar:
     st.caption(T["similar_hint"])
     s1, s2, s3 = st.columns(3)
     with s1:
         pos_s = st.selectbox(T["position"], list(POSITIONS), index=2, key="sim_pos")
     with s2:
-        min_min_s = st.selectbox(
-            T["min_minutes"], [0, 300, 600, 900], index=1, key="sim_min"
-        )
-    by_pos_s = get_pools_cached(
-        season_id, min_min_s, aggs, team_id_to_name, players_meta, as_of
-    )
+        min_min_s = st.selectbox(T["min_minutes"], [0, 300, 600, 900], index=1, key="sim_min")
+    by_pos_s = get_pools_cached(season_id, min_min_s, aggs, team_id_to_name, players_meta, as_of)
     pool_s = by_pos_s[pos_s]
     teams_s = sorted({str(g["Team"]) for g in pool_s if g.get("Team")})
     with s3:
-        team_s = st.selectbox(
-            T["team"], [T["all_teams"]] + teams_s, key="sim_team"
-        )
-
-    pool_ref = (
-        pool_s if team_s == T["all_teams"] else [g for g in pool_s if g["Team"] == team_s]
-    )
+        team_s = st.selectbox(T["team"], [T["all_teams"]] + teams_s, key="sim_team")
+    pool_ref = pool_s if team_s == T["all_teams"] else [g for g in pool_s if g["Team"] == team_s]
     pool_ref = sorted(pool_ref, key=lambda g: (g["Player"] or "").lower())
     n_pos = len(pool_s)
     if 0 < n_pos < SMALL_SAMPLE_N:
         st.warning(T["small_sample"].format(n=n_pos))
-
     if len(pool_s) < 2 or not pool_ref:
         st.warning(T["no_similar"])
     else:
-        labels_ref = [
-            f"{g['Player']} · {g['Team']} · {g['Minutes']}′" for g in pool_ref
-        ]
+        labels_ref = [f"{g['Player']} · {g['Team']} · {g['Minutes']}′" for g in pool_ref]
         choice_ref = st.selectbox(T["ref_player"], labels_ref, key="sim_ref")
         ref = pool_ref[labels_ref.index(choice_ref)]
         top_n = st.selectbox(T["top_n"], [5, 10, 15], index=1, key="sim_topn")
-
         mdefs = POSITION_METRICS[pos_s]
         ref_vec = pct_vector(ref, mdefs)
-
         scored = []
         for g in pool_s:
             if player_key(g) == player_key(ref):
                 continue
-            sim = similarity_score(ref_vec, pct_vector(g, mdefs))
-            scored.append((sim, g))
+            scored.append((similarity_score(ref_vec, pct_vector(g, mdefs)), g))
         scored.sort(key=lambda x: x[0], reverse=True)
         scored = scored[: int(top_n)]
-
         st.markdown(f"##### {T['results']}")
         if not scored:
             st.warning(T["no_similar"])
         else:
-            rows = []
-            ref_row = {
+            rows = [{
                 "#": "★",
                 "Player": ref["Player"],
                 "Team": ref["Team"],
                 T["age"]: fmt_age(ref.get("Age")),
                 "Minutes": ref["Minutes"],
                 T["similarity"]: fmt_num(100, "pct"),
-            }
+            }]
             for m in mdefs[:4]:
-                ref_row[f"{m['label']} %ile"] = fmt_num(
-                    ref.get("pct", {}).get(m["key"]), "pct"
-                )
-            rows.append(ref_row)
-
+                rows[0][f"{m['label']} %ile"] = fmt_num(ref.get("pct", {}).get(m["key"]), "pct")
             for rank, (sim, g) in enumerate(scored, start=1):
                 row = {
                     "#": rank,
@@ -1821,34 +1663,18 @@ with tab_similar:
                     T["similarity"]: fmt_num(sim, "pct"),
                 }
                 for m in mdefs[:4]:
-                    row[f"{m['label']} %ile"] = fmt_num(
-                        g.get("pct", {}).get(m["key"]), "pct"
-                    )
+                    row[f"{m['label']} %ile"] = fmt_num(g.get("pct", {}).get(m["key"]), "pct")
                 rows.append(row)
-
             df = pd.DataFrame(rows)
             pct_cols = [c for c in df.columns if "%ile" in c]
             st.caption(
                 f"{ref['Player']} · {pos_s} · n={n_pos}"
-                + (
-                    " · ★ = reference · similarity from percentile shape"
-                    if is_en
-                    else " · ★ = 基準選手 · Percentile形状に基づく類似度"
-                )
+                + (" · ★ = reference" if is_en else " · ★ = 基準選手")
             )
             if pct_cols:
-                st.dataframe(
-                    df.style.map(style_percentile_col, subset=pct_cols),
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                st.dataframe(df.style.map(style_percentile_col, subset=pct_cols), use_container_width=True, hide_index=True)
             else:
                 st.dataframe(df, use_container_width=True, hide_index=True)
-            st.caption(
-                "Open Compare or Player Radar to inspect profiles."
-                if is_en
-                else "詳細は 選手比較 または 選手レーダー タブで確認できます。"
-            )
 
 with st.expander(T["method_title"], expanded=False):
     st.markdown(
@@ -1861,9 +1687,7 @@ with st.expander(T["admin_title"], expanded=False):
     force_all = st.checkbox(T["force"], value=False)
     if st.button(T["update"], type="primary"):
         with st.spinner(T["updating"]):
-            aggs2, status2, errors2 = incremental_update(
-                season_id, season_info, force_all=force_all
-            )
+            aggs2, status2, errors2 = incremental_update(season_id, season_info, force_all=force_all)
             st.session_state.fx_aggs = aggs2
             st.session_state.fx_status = status2
             st.session_state.fx_errors = errors2
