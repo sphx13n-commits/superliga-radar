@@ -1,5 +1,4 @@
 import base64
-import io
 import json
 import math
 import os
@@ -7,11 +6,6 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -20,10 +14,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Superliga Radar", page_icon="⚽", layout="centered")
-
 components.html(
-    """
-    <script>
+    """<script>
     (function () {
       try { if (window.parent && window.parent.history) window.parent.history.scrollRestoration = 'manual'; } catch (e) {}
       function toTop() {
@@ -36,8 +28,7 @@ components.html(
       }
       toTop(); setTimeout(toTop, 50); setTimeout(toTop, 200);
     })();
-    </script>
-    """,
+    </script>""",
     height=0,
 )
 
@@ -206,11 +197,7 @@ T = {
     "no_players": "No players match the filters." if is_en else "条件に合う選手がいません。",
     "no_compare": "No other players in this position." if is_en else "同ポジションに比較できる選手がいません。",
     "pct_title": "What is Percentile?" if is_en else "Percentileとは？",
-    "pct_body": (
-        "Same-position ranking 0–100 under the minute filter.\n\nBands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30"
-        if is_en else
-        "同ポジション・出場時間条件での順位（0–100）。\n\n帯: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満"
-    ),
+    "pct_body": ("Same-position ranking 0–100 under the minute filter.\n\nBands: Elite 90+ · Strong 70–89 · Average 30–69 · Below <30" if is_en else "同ポジション・出場時間条件での順位（0–100）。\n\n帯: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満"),
     "early_note": "Early season: overall sample is still building — treat percentiles as indicative." if is_en else "シーズン序盤は全体の母集団がまだ小さいため、Percentileは参考値として見てください。",
     "small_sample": "⚠ Small sample (n={n}) — percentile ranks can swing a lot." if is_en else "⚠ 母集団が小さいです（n={n}）。Percentileは参考値として見てください。",
     "band_legend": "Vertex (single): Elite 90+ · Strong 70–89 · Average 30–69 · Below <30" if is_en else "頂点色（単体）: Elite 90+ · Strong 70–89 · Average 30–69 · Below 30未満",
@@ -351,8 +338,7 @@ def format_updated_at(iso_str):
     if not iso_str:
         return "—"
     try:
-        s = str(iso_str).replace("Z", "+00:00")
-        dt = datetime.fromisoformat(s)
+        dt = datetime.fromisoformat(str(iso_str).replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -477,13 +463,15 @@ def build_radar_figure(
             textfont={"size": 18, "color": NAVY, "family": "Arial Black, Arial, sans-serif"},
             hoverinfo="skip", showlegend=False,
         ))
+
     annotations = []
     title_sizes = [32, 18, 14] if values_b is not None else [44, 20, 16]
     title_ys = [0.975, 0.935, 0.905] if values_b is not None else [0.985, 0.938, 0.905]
     for i, line in enumerate(title_lines):
         annotations.append({
-            "text": f"<b>{line}</b>" if i == 0 else line, "xref": "paper", "yref": "paper",
-            "x": 0.5, "y": title_ys[i] if i < len(title_ys) else 0.88,
+            "text": f"<b>{line}</b>" if i == 0 else line,
+            "xref": "paper", "yref": "paper", "x": 0.5,
+            "y": title_ys[i] if i < len(title_ys) else 0.88,
             "xanchor": "center", "yanchor": "top", "showarrow": False,
             "font": {"color": NAVY, "size": title_sizes[i] if i < len(title_sizes) else 15, "family": "Arial"},
         })
@@ -491,20 +479,23 @@ def build_radar_figure(
         annotations.append({
             "text": f"<span style='color:{NAVY}'><b>■ {name_a}</b></span>　　<span style='color:{ACCENT}'><b>■ {name_b}</b></span>",
             "xref": "paper", "yref": "paper", "x": 0.5, "y": 0.148,
-            "xanchor": "center", "yanchor": "top", "showarrow": False, "font": {"size": 15, "family": "Arial"},
+            "xanchor": "center", "yanchor": "top", "showarrow": False,
+            "font": {"size": 15, "family": "Arial"},
         })
     base_y = 0.118 if values_b is None else 0.108
     for i, line in enumerate(footnotes or []):
         annotations.append({
-            "text": line, "xref": "paper", "yref": "paper", "x": 0.03, "y": base_y - i * 0.026,
+            "text": line, "xref": "paper", "yref": "paper",
+            "x": 0.03, "y": base_y - i * 0.026,
             "xanchor": "left", "yanchor": "top", "showarrow": False,
             "font": {"color": "#374151", "size": 13, "family": "Arial"},
         })
     annotations.append({
         "text": "<b>@Dalaprospect</b>", "xref": "paper", "yref": "paper",
-        "x": 0.97, "y": 0.012, "xanchor": "right", "yanchor": "bottom", "showarrow": False,
-        "font": {"color": NAVY, "size": 14, "family": "Arial"},
+        "x": 0.97, "y": 0.012, "xanchor": "right", "yanchor": "bottom",
+        "showarrow": False, "font": {"color": NAVY, "size": 14, "family": "Arial"},
     })
+
     images = []
     if club_logo_uri and values_b is None:
         images.append({
@@ -519,6 +510,7 @@ def build_radar_figure(
             "x": 0.97, "y": 0.048, "sizex": 0.085, "sizey": 0.085,
             "xanchor": "right", "yanchor": "bottom", "sizing": "contain", "layer": "above",
         })
+
     fig.update_layout(
         height=1500, width=1200,
         margin={"l": 120, "r": 120, "t": 155, "b": 170},
@@ -528,8 +520,10 @@ def build_radar_figure(
             "domain": {"x": [0.15, 0.85], "y": [0.19, 0.80]},
             "bgcolor": BG,
             "radialaxis": {
-                "visible": True, "range": [0, 122], "tickvals": [0, 20, 40, 60, 80, 100],
-                "gridcolor": GRID, "linecolor": AXIS, "tickfont": {"color": AXIS, "size": 13},
+                "visible": True, "range": [0, 122],
+                "tickvals": [0, 20, 40, 60, 80, 100],
+                "gridcolor": GRID, "linecolor": AXIS,
+                "tickfont": {"color": AXIS, "size": 13},
             },
             "angularaxis": {
                 "gridcolor": GRID, "linecolor": AXIS,
@@ -541,56 +535,43 @@ def build_radar_figure(
     return fig
 
 
-def _mpl_fallback_png(fig_kwargs):
-    labels = fig_kwargs["labels"]
-    values_a = fig_kwargs["values_a"]
-    n = max(len(labels), 1)
-    angles = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist() + [0]
-    def closed(vals):
-        vals = [float(v or 0) for v in vals]
-        return vals + vals[:1]
-    fig = plt.figure(figsize=(9, 12), dpi=140, facecolor="white")
-    lines = fig_kwargs.get("title_lines") or []
-    fig.text(0.5, 0.965, lines[0] if lines else "", ha="center", va="top", fontsize=20, fontweight="bold", color=NAVY)
-    if len(lines) > 1:
-        fig.text(0.5, 0.932, lines[1], ha="center", va="top", fontsize=12, color=NAVY)
-    if len(lines) > 2:
-        fig.text(0.5, 0.908, lines[2], ha="center", va="top", fontsize=10, color="#64748B")
-    ax = fig.add_axes([0.10, 0.18, 0.80, 0.68], polar=True)
-    ax.set_facecolor(BG)
-    ax.set_theta_offset(np.pi / 2)
-    ax.set_theta_direction(-1)
-    ax.set_ylim(0, 122)
-    ax.set_yticks([20, 40, 60, 80, 100])
-    ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels, color=NAVY, fontsize=9)
-    r_a = closed(values_a)
-    ax.plot(angles, r_a, color=NAVY, linewidth=2.4)
-    ax.fill(angles, r_a, color=NAVY, alpha=0.28)
-    cols = fig_kwargs.get("marker_colors_a") or [NAVY] * n
-    ax.scatter(angles[:-1], r_a[:-1], c=cols, s=70, zorder=5, edgecolors=NAVY)
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=140, facecolor="white", bbox_inches="tight")
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
-
-
 def render_radar(fig_kwargs, fname_base):
-    fig = build_radar_figure(**{k: v for k, v in fig_kwargs.items() if k != "mode"})
+    fig = build_radar_figure(**fig_kwargs)
     png = None
     try:
         try:
-            pio.kaleido.scope.chromium_args = ("--headless", "--no-sandbox", "--single-process", "--disable-gpu")
+            pio.kaleido.scope.chromium_args = (
+                "--headless", "--no-sandbox", "--single-process", "--disable-gpu",
+            )
         except Exception:
             pass
         png = fig.to_image(format="png", width=1200, height=1500, scale=2)
     except Exception:
         png = None
-    if not png:
-        png = _mpl_fallback_png(fig_kwargs)
-    st.image(png, use_container_width=True)
-    st.download_button(T["download"], data=png, file_name=f"{fname_base}_superliga_radar.png", mime="image/png")
+
+    if png:
+        st.image(png, use_container_width=True)
+        st.download_button(
+            T["download"], data=png,
+            file_name=f"{fname_base}_superliga_radar.png", mime="image/png",
+        )
+    else:
+        st.plotly_chart(
+            fig, use_container_width=True,
+            config={
+                "displaylogo": False,
+                "toImageButtonOptions": {
+                    "format": "png",
+                    "filename": f"{fname_base}_superliga_radar",
+                    "height": 1500, "width": 1200, "scale": 2,
+                },
+            },
+        )
+        st.caption(
+            "Use the camera icon on the chart to save."
+            if is_en else
+            "画像化に失敗したためチャートを表示しています。右上のカメラから保存できます。"
+        )
 
 
 def percentile_rank(values, target, higher_is_better=True):
@@ -666,13 +647,9 @@ def build_position_pools(aggs, team_id_to_name, min_min, players_meta=None, as_o
             "Player": a["player_name"] or f"id:{a['player_id']}",
             "PlayerId": pid,
             "Team": team_id_to_name.get(a["team_id"]) or (str(a["team_id"]) if a["team_id"] is not None else "Unknown"),
-            "TeamId": a["team_id"],
-            "Pos": pos,
-            "Minutes": int(round(mins)),
-            "Apps": a["apps"],
-            "Age": calc_age(dob, as_of),
-            "metrics": compute_metrics(a["raw"], mins, POSITION_METRICS[pos]),
-            "raw": a["raw"],
+            "TeamId": a["team_id"], "Pos": pos,
+            "Minutes": int(round(mins)), "Apps": a["apps"], "Age": calc_age(dob, as_of),
+            "metrics": compute_metrics(a["raw"], mins, POSITION_METRICS[pos]), "raw": a["raw"],
         })
     for pos, group in by_pos.items():
         for m in POSITION_METRICS[pos]:
@@ -786,11 +763,15 @@ def fetch_season_fixtures_list(sid, season_meta_row):
     all_fx, errors = fx_a, err_a
     if len(all_fx) == 0:
         fx_b, err_b, _, _, _ = _fetch_between_chunked(wide_start, wide_end, f"fixtureLeagues:{LEAGUE_ID}")
-        filtered = [fx for fx in fx_b if (fx.get("season_id") or (fx.get("season") or {}).get("id")) in (None, sid) or int(fx.get("season_id") or sid) == int(sid)]
+        filtered = []
+        for fx in fx_b:
+            fx_sid = fx.get("season_id") or (fx.get("season") or {}).get("id")
+            if fx_sid is None or int(fx_sid) == int(sid):
+                filtered.append(fx)
         all_fx = filtered if filtered else fx_b
         errors += err_b
     finished = [fx for fx in all_fx if _is_finished_fixture(fx)]
-    if len(finished) == 0 and all_fx:
+    if not finished and all_fx:
         finished = [fx for fx in all_fx if fx.get("scores") or fx.get("result_info") or fx.get("state_id") in (5, 7, 8)]
     payload = {
         "season_id": sid, "total_fetched": len(all_fx), "finished_count": len(finished), "list_errors": errors,
@@ -905,7 +886,7 @@ def incremental_update(sid, season_meta_row, force_all=False):
     finished_count = len(finished_ids)
     cached_ids, missing_ids = [], []
     for fid in finished_ids:
-        (cached_ids if (_cache_dir(sid) / f"fixture_{fid}.json").exists() and not force_all else missing_ids).append(fid)
+        (cached_ids if (cdir / f"fixture_{fid}.json").exists() and not force_all else missing_ids).append(fid)
     loaded, new_fetched, errors = [], 0, []
     for fid in cached_ids:
         data = _load_json(cdir / f"fixture_{fid}.json")
@@ -987,20 +968,17 @@ with tab_radar:
         logo_html = f'<img src="{club_uri}" style="height:40px;width:40px;object-fit:contain;margin-right:10px;vertical-align:middle;" />' if club_uri else ""
         st.markdown(
             f"""<div style="border:1px solid #D7E0EC;border-radius:12px;padding:14px 16px;margin:8px 0 14px;background:#F8FAFC;display:flex;align-items:center;">
-              {logo_html}
-              <div>
+              {logo_html}<div>
                 <div style="font-size:22px;font-weight:750;color:{NAVY};">{sel['Player']}</div>
                 <div style="margin-top:6px;color:#334155;font-size:14px;">{sel['Team']} · <b>{pos}</b> · {age_str} · {sel['Minutes']} min · {T['apps']} {sel['Apps']}</div>
                 <div style="margin-top:4px;color:#64748B;font-size:12px;">Superliga {season_name}</div>
-              </div>
-            </div>""",
+              </div></div>""",
             unsafe_allow_html=True,
         )
         if is_small:
             st.warning(T["small_sample"].format(n=n_pos))
         with st.expander(T["pct_title"], expanded=False):
-            st.markdown(T["pct_body"])
-            st.caption(T["band_legend"])
+            st.markdown(T["pct_body"]); st.caption(T["band_legend"])
         st.markdown(f"##### {T['radar']}")
         sample_line = f"{pos}, ≥{int(min_min_r)}′ (n={n_pos})" + ((" · ⚠ small" if is_en else " · ⚠ 母集団小") if is_small else "")
         fig_kwargs = {
@@ -1065,7 +1043,12 @@ with tab_compare:
                     "labels": [m["label"] for m in mdefs],
                     "values_a": [sel_a.get("pct", {}).get(m["key"]) or 0 for m in mdefs],
                     "title_lines": [f"{sel_a['Player']}  vs  {sel_b['Player']}", f"{pos_c} · Superliga {season_name}", "Percentile comparison"],
-                    "footnotes": [f"Overlay = percentile · Ring = 100 · {pos_c}, ≥{int(min_min_c)}′ (n={n_pos})", f"Navy = {sel_a['Player']} · Orange = {sel_b['Player']}", "Same position only · Numbers in table below", f"Superliga {season_name} · Superliga Radar · @Dalaprospect"],
+                    "footnotes": [
+                        f"Overlay = percentile · Ring = 100 · {pos_c}, ≥{int(min_min_c)}′ (n={n_pos})",
+                        f"Navy = {sel_a['Player']} · Orange = {sel_b['Player']}",
+                        "Same position only · Numbers in table below",
+                        f"Superliga {season_name} · Superliga Radar · @Dalaprospect",
+                    ],
                     "display_texts": None,
                     "values_b": [sel_b.get("pct", {}).get(m["key"]) or 0 for m in mdefs],
                     "name_a": sel_a["Player"], "name_b": sel_b["Player"],
@@ -1174,7 +1157,6 @@ with tab_similar:
 
 with st.expander(T["method_title"], expanded=False):
     st.markdown("形=Percentile · 類似度=同ポジションのPercentileベクトル距離 · 年齢=データ抽出日時点" if not is_en else "Shape=percentile · Similarity=percentile-vector distance · Age=as of data extract date")
-
 with st.expander(T["admin_title"], expanded=False):
     force_all = st.checkbox(T["force"], value=False)
     if st.button(T["update"], type="primary"):
