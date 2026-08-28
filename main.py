@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.io as pio
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
@@ -463,7 +462,6 @@ def build_radar_figure(
             textfont={"size": 18, "color": NAVY, "family": "Arial Black, Arial, sans-serif"},
             hoverinfo="skip", showlegend=False,
         ))
-
     annotations = []
     title_sizes = [32, 18, 14] if values_b is not None else [44, 20, 16]
     title_ys = [0.975, 0.935, 0.905] if values_b is not None else [0.985, 0.938, 0.905]
@@ -479,8 +477,7 @@ def build_radar_figure(
         annotations.append({
             "text": f"<span style='color:{NAVY}'><b>■ {name_a}</b></span>　　<span style='color:{ACCENT}'><b>■ {name_b}</b></span>",
             "xref": "paper", "yref": "paper", "x": 0.5, "y": 0.148,
-            "xanchor": "center", "yanchor": "top", "showarrow": False,
-            "font": {"size": 15, "family": "Arial"},
+            "xanchor": "center", "yanchor": "top", "showarrow": False, "font": {"size": 15, "family": "Arial"},
         })
     base_y = 0.118 if values_b is None else 0.108
     for i, line in enumerate(footnotes or []):
@@ -495,7 +492,6 @@ def build_radar_figure(
         "x": 0.97, "y": 0.012, "xanchor": "right", "yanchor": "bottom",
         "showarrow": False, "font": {"color": NAVY, "size": 14, "family": "Arial"},
     })
-
     images = []
     if club_logo_uri and values_b is None:
         images.append({
@@ -510,7 +506,6 @@ def build_radar_figure(
             "x": 0.97, "y": 0.048, "sizex": 0.085, "sizey": 0.085,
             "xanchor": "right", "yanchor": "bottom", "sizing": "contain", "layer": "above",
         })
-
     fig.update_layout(
         height=1500, width=1200,
         margin={"l": 120, "r": 120, "t": 155, "b": 170},
@@ -520,10 +515,8 @@ def build_radar_figure(
             "domain": {"x": [0.15, 0.85], "y": [0.19, 0.80]},
             "bgcolor": BG,
             "radialaxis": {
-                "visible": True, "range": [0, 122],
-                "tickvals": [0, 20, 40, 60, 80, 100],
-                "gridcolor": GRID, "linecolor": AXIS,
-                "tickfont": {"color": AXIS, "size": 13},
+                "visible": True, "range": [0, 122], "tickvals": [0, 20, 40, 60, 80, 100],
+                "gridcolor": GRID, "linecolor": AXIS, "tickfont": {"color": AXIS, "size": 13},
             },
             "angularaxis": {
                 "gridcolor": GRID, "linecolor": AXIS,
@@ -535,43 +528,101 @@ def build_radar_figure(
     return fig
 
 
+def build_radar_figure_web(
+    labels, values_a, display_texts=None, values_b=None,
+    name_a=None, name_b=None, marker_colors_a=None, club_logo_uri=None,
+):
+    fig = go.Figure()
+    n = len(labels)
+    theta = labels + [labels[0]]
+    m_colors = list(marker_colors_a) + [marker_colors_a[0]] if (marker_colors_a and values_b is None) else NAVY
+    fig.add_trace(go.Scatterpolar(
+        r=values_a + [values_a[0]], theta=theta, fill="toself", fillcolor=NAVY_SOFT,
+        line={"color": NAVY, "width": 3.0},
+        marker={"color": m_colors, "size": 12, "line": {"color": NAVY, "width": 1.4}},
+        mode="lines+markers", name=name_a or "A",
+        hovertemplate="%{theta}: %{r:.0f}<extra></extra>",
+    ))
+    if values_b is not None:
+        fig.add_trace(go.Scatterpolar(
+            r=values_b + [values_b[0]], theta=theta, fill="toself", fillcolor=ACCENT_SOFT,
+            line={"color": ACCENT, "width": 3.0},
+            marker={"color": ACCENT, "size": 12, "line": {"color": WHITE, "width": 1.0}},
+            mode="lines+markers", name=name_b or "B",
+            hovertemplate="%{theta}: %{r:.0f}<extra></extra>",
+        ))
+    fig.add_trace(go.Scatterpolar(
+        r=[100.0] * (n + 1), theta=theta, mode="lines",
+        line={"color": RING_100, "width": 2.2}, hoverinfo="skip", showlegend=False,
+    ))
+    if values_b is None and display_texts is not None:
+        fig.add_trace(go.Scatterpolar(
+            r=[108] * (n + 1), theta=theta, mode="text",
+            text=list(display_texts) + [display_texts[0]],
+            textfont={"size": 13, "color": NAVY, "family": "Arial Black, Arial, sans-serif"},
+            hoverinfo="skip", showlegend=False,
+        ))
+    images = []
+    if club_logo_uri and values_b is None:
+        images.append({
+            "source": club_logo_uri, "xref": "paper", "yref": "paper",
+            "x": 0.02, "y": 0.98, "sizex": 0.10, "sizey": 0.10,
+            "xanchor": "left", "yanchor": "top", "sizing": "contain", "layer": "above",
+        })
+    brand = get_logo_data_uri()
+    if brand:
+        images.append({
+            "source": brand, "xref": "paper", "yref": "paper",
+            "x": 0.98, "y": 0.02, "sizex": 0.08, "sizey": 0.08,
+            "xanchor": "right", "yanchor": "bottom", "sizing": "contain", "layer": "above",
+        })
+    fig.update_layout(
+        height=560, margin={"l": 40, "r": 40, "t": 24, "b": 36},
+        paper_bgcolor=WHITE, plot_bgcolor=WHITE, showlegend=False, images=images,
+        polar={
+            "domain": {"x": [0.02, 0.98], "y": [0.02, 0.98]},
+            "bgcolor": BG,
+            "radialaxis": {
+                "visible": True, "range": [0, 122],
+                "tickvals": [0, 20, 40, 60, 80, 100],
+                "gridcolor": GRID, "linecolor": AXIS, "tickfont": {"color": AXIS, "size": 10},
+            },
+            "angularaxis": {
+                "gridcolor": GRID, "linecolor": AXIS,
+                "tickfont": {"color": NAVY, "size": 11, "family": "Arial"},
+                "rotation": 90, "direction": "clockwise",
+            },
+        },
+    )
+    return fig
+
+
 def render_radar(fig_kwargs, fname_base):
-    fig = build_radar_figure(**fig_kwargs)
+    fig_export = build_radar_figure(**fig_kwargs)
     png = None
     try:
-        try:
-            pio.kaleido.scope.chromium_args = (
-                "--headless", "--no-sandbox", "--single-process", "--disable-gpu",
-            )
-        except Exception:
-            pass
-        png = fig.to_image(format="png", width=1200, height=1500, scale=2)
+        png = fig_export.to_image(format="png", width=1200, height=1500, scale=2)
     except Exception:
         png = None
-
     if png:
         st.image(png, use_container_width=True)
         st.download_button(
             T["download"], data=png,
             file_name=f"{fname_base}_superliga_radar.png", mime="image/png",
         )
-    else:
-        st.plotly_chart(
-            fig, use_container_width=True,
-            config={
-                "displaylogo": False,
-                "toImageButtonOptions": {
-                    "format": "png",
-                    "filename": f"{fname_base}_superliga_radar",
-                    "height": 1500, "width": 1200, "scale": 2,
-                },
-            },
-        )
-        st.caption(
-            "Use the camera icon on the chart to save."
-            if is_en else
-            "画像化に失敗したためチャートを表示しています。右上のカメラから保存できます。"
-        )
+        return
+    fig_web = build_radar_figure_web(
+        labels=fig_kwargs["labels"],
+        values_a=fig_kwargs["values_a"],
+        display_texts=fig_kwargs.get("display_texts"),
+        values_b=fig_kwargs.get("values_b"),
+        name_a=fig_kwargs.get("name_a"),
+        name_b=fig_kwargs.get("name_b"),
+        marker_colors_a=fig_kwargs.get("marker_colors_a"),
+        club_logo_uri=fig_kwargs.get("club_logo_uri"),
+    )
+    st.plotly_chart(fig_web, use_container_width=True, config={"displaylogo": False})
+    st.caption("PNG export failed. Showing compact chart." if is_en else "保存用画像の生成に失敗したため、画面用チャートを表示しています。")
 
 
 def percentile_rank(values, target, higher_is_better=True):
