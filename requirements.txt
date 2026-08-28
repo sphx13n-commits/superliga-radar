@@ -1,5 +1,5 @@
 streamlit
 requests
+pandas
 plotly
-kaleido
-kaleido==0.2.1
+kaleido>=1.0.0
