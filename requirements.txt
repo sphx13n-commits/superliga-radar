@@ -3,5 +3,4 @@ requests
 pandas
 plotly
 matplotlib
-numpy
 kaleido>=1.0.0
